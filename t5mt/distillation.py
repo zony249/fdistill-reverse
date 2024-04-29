@@ -143,7 +143,7 @@ class SummarizationDistiller(TranslationModule):
         if isinstance(self.model, T5ForConditionalGeneration):
             decoder_input_ids = self.model._shift_right(labels)
         else:
-            decoder_input_ids = shift_tokens_right(labels, pad_token_id)
+            decoder_input_ids = shift_tokens_right(labels, pad_token_id, self.model._get_decoder_start_token_id())
 
         # noinspection PyCallingNonCallable
         student_outputs = self(
