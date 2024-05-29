@@ -164,6 +164,9 @@ def run_generate(verbose=True):
 
     if verbose:
         print(scores)
+    scores["bleu_score"] = scores["bleu_score"].score
+    scores["chrf_score"] = scores["chrf_score"].score
+    scores["ter_score"] = scores["ter_score"].score
 
     if args.score_path is not None:
         json.dump(dict(scores), open(args.score_path, "w"))

@@ -103,6 +103,11 @@ class SummarizationDistiller(TranslationModule):
             self.e_matches = None
             self.d_matches = None
 
+        print("Encoder Layers Copied:", self.e_layer_ids)
+        print("Decoder Layers Copied:", self.d_layer_ids)
+        print("Encoder Layers Supervised:", self.e_matches)
+        print("Decoder Layers Supervised:", self.d_matches)
+
         self.ce_loss_fct = nn.KLDivLoss(reduction="batchmean")
         self.temperature = hparams.temperature
         self.alpha_mlm = hparams.alpha_mlm
