@@ -87,6 +87,8 @@ class SummarizationDistiller(TranslationModule):
             d_layer_ids = list(range(student_decoder_layers))
 
         self.e_layer_ids, self.d_layer_ids = e_layer_ids, d_layer_ids  # type: List[int], List[int]
+        if hparams.reverse:
+            self.e_layer_ids, self.d_layer_ids = e_layer_ids[::-1], d_layer_ids[::-1]
 
         if self.do_calc_hidden_loss:  # Intermediate supervision: Decide which layers to supervise
             if hparams.supervise_forward:
@@ -269,6 +271,7 @@ def add_distill_args(parser):
     parser.add_argument("--supervise_forward", action="store_true", default=False)
     parser.add_argument("--normalize_hidden", action="store_true", default=False)
     parser.add_argument("--temperature", default=1., type=float)
+    parser.add_argument("--reverse", action="store_true", default=False)
 
 
 class TranslationDistiller(SummarizationDistiller):
