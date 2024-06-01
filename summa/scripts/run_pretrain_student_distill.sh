@@ -1,7 +1,22 @@
-python ../distillation.py \
-  --teacher '' \
-  --data_dir '' \
-  --tokenizer_name '' \
+#!/bin/sh
+
+
+#SBATCH --cpus-per-task=4 # number of cores
+#SBATCH --mem=32000 # 100M for the whole job 
+#SBATCH --time=0-01:00 # walltime in d-hh:mm or hh:mm:ss format
+#SBATCH --account=def-lilimou 
+#SBATCH --gres=gpu:1 # GPUs per node
+#SBATCH --output=slurm-logs/slurm-%j-wmt-student-js-eval.out
+
+nvidia-smi
+
+export MODEL_SAVE_DIR=runs/$(date +%d-%m-%y--%T)--xsum-student-predistill-forward
+
+
+python distillation.py \
+  --teacher facebook/bart-large-xsum \
+  --data_dir xsum \
+  --tokenizer_name facebook/bart-large-xsum \
   --student_decoder_layers 3 --student_encoder_layers 3 \
   --freeze_embeds \
   --learning_rate=3e-4 \

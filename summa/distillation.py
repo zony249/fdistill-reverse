@@ -102,6 +102,12 @@ class SummarizationDistiller(SummarizationModule):
             self.e_matches = None
             self.d_matches = None
 
+
+        print("Encoder Layers Copied:", self.e_layer_ids)
+        print("Decoder Layers Copied:", self.d_layer_ids)
+        print("Encoder Layers Supervised:", self.e_matches)
+        print("Decoder Layers Supervised:", self.d_matches)
+
         self.ce_loss_fct = nn.KLDivLoss(reduction="batchmean")
         self.temperature = hparams.temperature
         self.alpha_mlm = hparams.alpha_mlm
@@ -142,7 +148,7 @@ class SummarizationDistiller(SummarizationModule):
         if isinstance(self.model, T5ForConditionalGeneration):
             decoder_input_ids = self.model._shift_right(labels)
         else:
-            decoder_input_ids = shift_tokens_right(labels, pad_token_id)
+            decoder_input_ids = shift_tokens_right(labels, pad_token_id, self.model.config.decoder_start_token_id)
 
         # noinspection PyCallingNonCallable
         student_outputs = self(
