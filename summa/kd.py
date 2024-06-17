@@ -473,7 +473,7 @@ class SummarizationDistiller(SummarizationModule):
         pad_token_id = self.tokenizer.pad_token_id
         input_ids, src_mask, labels = batch["input_ids"], batch["attention_mask"], batch["labels"]
         student_pred_ids = self._generate(batch)
-        decoder_input_ids = shift_tokens_right(student_pred_ids, pad_token_id)
+        decoder_input_ids = shift_tokens_right(student_pred_ids, pad_token_id, self.model.config.decoder_start_token_id)
     
         # noinspection PyCallingNonCallable
         student_outputs = self(
@@ -504,7 +504,7 @@ class SummarizationDistiller(SummarizationModule):
     def _js_teacher_step(self, batch):
         pad_token_id = self.tokenizer.pad_token_id
         input_ids, src_mask, labels = batch["input_ids"], batch["attention_mask"], batch["labels"]
-        decoder_input_ids = shift_tokens_right(labels, pad_token_id)
+        decoder_input_ids = shift_tokens_right(labels, pad_token_id, self.teacher.config.decoder_start_token_id)
 
         # noinspection PyCallingNonCallable
         student_outputs = self(
