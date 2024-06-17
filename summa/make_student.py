@@ -51,9 +51,11 @@ LAYERS_TO_SUPERVISE = {
 }
 
 
-def pick_layers_to_copy(n_student, n_teacher):
+def pick_layers_to_copy(n_student, n_teacher, reverse=False):
     try:
         val = LAYERS_TO_COPY[n_teacher][n_student]
+        if reverse:
+            val = val[::-1]
         return val
     except KeyError:
         if n_student != n_teacher:
@@ -83,6 +85,7 @@ def create_student_by_copying_alternating_layers(
     copy_first_teacher_layers=False,
     e_layers_to_copy=None,
     d_layers_to_copy=None,
+    reverse=False, 
     **extra_config_kwargs
 ) -> Tuple[PreTrainedModel, List[int], List[int]]:
     """Make a student by copying alternating layers from a teacher, save it to save_path.
@@ -145,9 +148,9 @@ def create_student_by_copying_alternating_layers(
 
     # Decide which layers of the teacher to copy. Not exactly alternating -- we try to keep first and last layer.
     if e_layers_to_copy is None:
-        e_layers_to_copy: List[int] = pick_layers_to_copy(e, teacher_e)
+        e_layers_to_copy: List[int] = pick_layers_to_copy(e, teacher_e, reverse)
     if d_layers_to_copy is None:
-        d_layers_to_copy: List[int] = pick_layers_to_copy(d, teacher_d)
+        d_layers_to_copy: List[int] = pick_layers_to_copy(d, teacher_d, reverse)
 
     try:
         copy_layers(teacher.model.encoder.layers, student.model.encoder.layers, e_layers_to_copy)
