@@ -79,7 +79,10 @@ class BaseTransformer(pl.LightningModule):
 
         self.save_hyperparameters(hparams)
         self.step_count = 0
-        self.output_dir = Path(self.hparams.output_dir)
+        if self.hparams.output_dir is not None: 
+            self.output_dir = Path(self.hparams.output_dir)
+        else:
+            self.output_dir = None
         cache_dir = self.hparams.cache_dir if self.hparams.cache_dir else None
         if config is None:
             self.config = AutoConfig.from_pretrained(
@@ -198,7 +201,8 @@ class BaseTransformer(pl.LightningModule):
 
     @pl.utilities.rank_zero_only
     def on_save_checkpoint(self, checkpoint: Dict[str, Any]) -> None:
-        save_path = self.output_dir.joinpath("best_tfmr")
+        if self.output_dir is not None:
+            save_path = self.output_dir.joinpath("best_tfmr")
         self.model.config.save_step = self.step_count
         self.model.save_pretrained(save_path)
         self.tokenizer.save_pretrained(save_path)
@@ -284,7 +288,9 @@ class LoggingCallback(pl.Callback):
         rank_zero_info("***** Test results *****")
         metrics = trainer.callback_metrics
         # Log and save results to file
-        output_test_results_file = os.path.join(pl_module.hparams.output_dir, "test_results.txt")
+
+        if self.hparams.output_dir is not None:
+            output_test_results_file = os.path.join(pl_module.hparams.output_dir, "test_results.txt")
         with open(output_test_results_file, "w") as writer:
             for key in sorted(metrics):
                 if key not in ["log", "progress_bar"]:

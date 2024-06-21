@@ -25,7 +25,8 @@ DEFAULT_DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
 
 def generate_summaries_or_translations(
-    data_path: str,
+    data_path: str, 
+    ref_folder: str, 
     out_file: str,
     model_name: str,
     batch_size: int = 8,
@@ -49,11 +50,11 @@ def generate_summaries_or_translations(
     tokenizer = AutoTokenizer.from_pretrained(model_name)
     logger.info(f"Inferred tokenizer type: {tokenizer.__class__}")  # if this is wrong, check config.model_type.
     #file_dict = read_webnlg_files(data_path, tokenizer)
-    src_file = data_path+'.src'
+    src_file = data_path #+'.src'
     input_lns = [x.rstrip() for x in open(src_file).readlines()]#list(file_dict.keys())
-    ref0_file = data_path+'.ref0'
-    ref1_file = data_path+'.ref1'
-    ref2_file = data_path+'.ref2'
+    ref0_file = ref_folder+'/test.ref0' # these three lines have been changed
+    ref1_file = ref_folder+'/test.ref1'
+    ref2_file = ref_folder+'/test.ref2'
     refs0 = [x.rstrip() for x in open(ref0_file).readlines()]
     refs1 = [x.rstrip() for x in open(ref1_file).readlines()]
     refs2 = [x.rstrip() for x in open(ref2_file).readlines()]
@@ -93,6 +94,8 @@ def generate_summaries_or_translations(
         #summaries = summaries[:, input_ids.size(1)-1:]
 
         dec = tokenizer.batch_decode(summaries, skip_special_tokens=True, clean_up_tokenization_spaces=False)
+        dec_with_tokens = tokenizer.batch_decode(summaries, skip_special_tokens=False)
+        print(dec_with_tokens)
         #print(dec)
         for hypothesis in dec:
             hypothesis = hypothesis.lstrip().rstrip()
@@ -142,6 +145,7 @@ def run_generate(verbose=True):
     parser = argparse.ArgumentParser()
     parser.add_argument("--model_name", type=str, help="like facebook/bart-large-cnn,t5-base, etc.")
     parser.add_argument("--input_path", type=str, help="like cnn_dm/test.source")
+    parser.add_argument("--ref_dir", type=str, help="reference directory containing the ref files")
     parser.add_argument("--save_path", type=str, help="where to save summaries")
     parser.add_argument("--reference_path", type=str, required=False, help="like cnn_dm/test.target")
     parser.add_argument("--score_path", type=str, required=False, default="metrics.json", help="where to save metrics")
@@ -190,6 +194,7 @@ def run_generate(verbose=True):
     
     output_lns, reference_lns, runtime_metrics = generate_summaries_or_translations(
         args.input_path,
+        args.ref_dir, 
         args.save_path,
         args.model_name,
         batch_size=args.bs,

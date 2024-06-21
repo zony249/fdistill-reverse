@@ -46,7 +46,7 @@ class SummarizationDistiller(TranslationModule):
             e_layer_ids, d_layer_ids = None, None
         else:
             student, e_layer_ids, d_layer_ids = create_student_by_copying_alternating_layers(
-                teacher, e=hparams.student_encoder_layers, d=hparams.student_decoder_layers, save_path=save_dir
+                teacher, e=hparams.student_encoder_layers, d=hparams.student_decoder_layers, save_path=save_dir, reverse=hparams.reverse
             )
 
         if hparams.length_penalty != -1:
@@ -87,8 +87,6 @@ class SummarizationDistiller(TranslationModule):
             d_layer_ids = list(range(student_decoder_layers))
 
         self.e_layer_ids, self.d_layer_ids = e_layer_ids, d_layer_ids  # type: List[int], List[int]
-        if hparams.reverse:
-            self.e_layer_ids, self.d_layer_ids = e_layer_ids[::-1], d_layer_ids[::-1]
 
         if self.do_calc_hidden_loss:  # Intermediate supervision: Decide which layers to supervise
             if hparams.supervise_forward:
