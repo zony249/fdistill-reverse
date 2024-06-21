@@ -135,14 +135,20 @@ class BaseTransformer(pl.LightningModule):
         no_decay = ["bias", "LayerNorm.weight"]
         optimizer_grouped_parameters = [
             {
-                "params": [p for n, p in model.named_parameters() if not any(nd in n for nd in no_decay)],
+                "params": [p for n, p in model.named_parameters() if not any((nd in n) for nd in no_decay) and not "shared" in n],
                 "weight_decay": self.hparams.weight_decay,
             },
             {
-                "params": [p for n, p in model.named_parameters() if any(nd in n for nd in no_decay)],
+                "params": [p for n, p in model.named_parameters() if any((nd in n ) for nd in no_decay) and not "shared" in n],
                 "weight_decay": 0.0,
             },
+            {
+                "params": [model.lm_head.weight], 
+                "weight_decay": 1e-2,
+            },
         ]
+        
+
         if self.hparams.adafactor:
             optimizer = Adafactor(
                 optimizer_grouped_parameters, lr=self.hparams.learning_rate, scale_parameter=False, relative_step=False
