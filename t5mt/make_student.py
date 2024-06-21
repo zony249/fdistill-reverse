@@ -1,6 +1,7 @@
 import warnings
 from pathlib import Path
 from typing import List, Tuple, Union
+from copy import deepcopy
 
 import fire
 from torch import nn
@@ -13,9 +14,12 @@ logger = logging.get_logger(__name__)
 
 
 def copy_layers(src_layers: nn.ModuleList, dest_layers: nn.ModuleList, layers_to_copy: List[int]) -> None:
-    layers_to_copy = nn.ModuleList([src_layers[i] for i in layers_to_copy])
+    # layers_to_copy = nn.ModuleList([src_layers[i] for i in layers_to_copy])
+    layers_to_copy = deepcopy(nn.ModuleList([src_layers[i] for i in layers_to_copy]))
+    # print(layers_to_copy)
     assert len(dest_layers) == len(layers_to_copy), f"{len(dest_layers)} != {len(layers_to_copy)}"
-    dest_layers.load_state_dict(layers_to_copy.state_dict())
+    # dest_layers.load_state_dict(layers_to_copy.state_dict())
+    dest_layers = layers_to_copy
 
 
 LAYERS_TO_COPY = {
@@ -154,6 +158,10 @@ def create_student_by_copying_alternating_layers(
         e_layers_to_copy = e_layers_to_copy[::-1]
         d_layers_to_copy = d_layers_to_copy[::-1]
 
+
+    print("e_layers_to_copy", e_layers_to_copy)
+    print("d_layers_to_copy", d_layers_to_copy)
+
     try:
         copy_layers(teacher.model.encoder.layers, student.model.encoder.layers, e_layers_to_copy)
         copy_layers(teacher.model.decoder.layers, student.model.decoder.layers, d_layers_to_copy)
@@ -170,6 +178,8 @@ def create_student_by_copying_alternating_layers(
     )
     student.save_pretrained(save_path)
     # Save information about copying for easier reproducibility
+    print("========== Student Model Architecture ==========")
+    print(student)
 
     return student, e_layers_to_copy, d_layers_to_copy
 
