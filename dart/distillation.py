@@ -44,7 +44,7 @@ class SummarizationDistiller(SummarizationModule):
             e_layer_ids, d_layer_ids = None, None
         else:
             student, e_layer_ids, d_layer_ids = create_student_by_copying_alternating_layers(
-                teacher, e=hparams.student_encoder_layers, d=hparams.student_decoder_layers, save_path=save_dir
+                teacher, e=hparams.student_encoder_layers, d=hparams.student_decoder_layers, save_path=save_dir, reverse=hparams.reverse
             )
 
         if hparams.length_penalty != -1:

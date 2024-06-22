@@ -20,6 +20,7 @@ def copy_layers(src_layers: nn.ModuleList, dest_layers: nn.ModuleList, layers_to
     assert len(dest_layers) == len(layers_to_copy), f"{len(dest_layers)} != {len(layers_to_copy)}"
     # dest_layers.load_state_dict(layers_to_copy.state_dict())
     dest_layers = layers_to_copy
+    return dest_layers
 
 
 LAYERS_TO_COPY = {
@@ -158,16 +159,12 @@ def create_student_by_copying_alternating_layers(
         e_layers_to_copy = e_layers_to_copy[::-1]
         d_layers_to_copy = d_layers_to_copy[::-1]
 
-
-    print("e_layers_to_copy", e_layers_to_copy)
-    print("d_layers_to_copy", d_layers_to_copy)
-
     try:
-        copy_layers(teacher.model.encoder.layers, student.model.encoder.layers, e_layers_to_copy)
-        copy_layers(teacher.model.decoder.layers, student.model.decoder.layers, d_layers_to_copy)
+        student.model.encoder.layers = copy_layers(teacher.model.encoder.layers, student.model.encoder.layers, e_layers_to_copy)
+        student.model.decoder.layers = copy_layers(teacher.model.decoder.layers, student.model.decoder.layers, d_layers_to_copy)
     except AttributeError:  # For t5, student.model.encoder.layers is called student.encoder.block
-        copy_layers(teacher.encoder.block, student.encoder.block, e_layers_to_copy)
-        copy_layers(teacher.decoder.block, student.decoder.block, d_layers_to_copy)
+        student.encoder.block = copy_layers(teacher.encoder.block, student.encoder.block, e_layers_to_copy)
+        student.decoder.block = copy_layers(teacher.decoder.block, student.decoder.block, d_layers_to_copy)
     logger.info(
         f"Copied encoder layers {e_layers_to_copy} and decoder layers {d_layers_to_copy}. Saving them to {save_path}"
     )
