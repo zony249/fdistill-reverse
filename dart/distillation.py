@@ -141,7 +141,7 @@ class SummarizationDistiller(SummarizationModule):
         if isinstance(self.model, T5ForConditionalGeneration):
             decoder_input_ids = self.model._shift_right(labels)
         else:
-            decoder_input_ids = shift_tokens_right(labels, pad_token_id)
+            decoder_input_ids = shift_tokens_right(labels, pad_token_id, self.model.config.decoder_start_token_id)
 
         # noinspection PyCallingNonCallable
         student_outputs = self(
@@ -209,6 +209,13 @@ class SummarizationDistiller(SummarizationModule):
                 normalize_hidden=self.hparams.normalize_hidden,
             )
 
+        if torch.isnan(hid_loss_enc): 
+            print("isnan!")
+        else: 
+            print("")
+
+
+
         blended_loss = (
             self.alpha_ce * loss_ce
             + self.alpha_mlm * student_lm_loss
@@ -253,6 +260,7 @@ def add_distill_args(parser):
     parser.add_argument("--temperature", type=float, default=1.)
     parser.add_argument("--supervise_forward", action="store_true", default=False)
     parser.add_argument("--normalize_hidden", action="store_true", default=False)
+    parser.add_argument("--reverse", action="store_true", default=False)
 
 
 class TranslationDistiller(SummarizationDistiller):
