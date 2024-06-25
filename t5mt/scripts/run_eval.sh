@@ -6,9 +6,9 @@
 #SBATCH --time=0-01:00 # walltime in d-hh:mm or hh:mm:ss format
 #SBATCH --account=def-lilimou 
 #SBATCH --gres=gpu:1 # GPUs per node
-#SBATCH --output=slurm-logs/slurm-%j-wmt-student-js-eval.out
+#SBATCH --output=slurm-logs/slurm-%j-wmt-student-predistill-forward-eval.out
 
-export MODEL_NAME=$SCRATCH/fdistill-reverse/runs/student-js-05-27-24--11:33:39/best_tfmr
+export MODEL_NAME=models/wmt-student-predistill
 echo $MODEL_NAME
 export BEAM=5
 export OUTPUT=$SCRATCH/fdistill-reverse/evals/pred-$(date +%m-%d-%y)

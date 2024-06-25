@@ -2,10 +2,10 @@
 
 #SBATCH --cpus-per-task=4 # number of cores
 #SBATCH --mem=32000 # 100M for the whole job 
-#SBATCH --time=7-00:00 # walltime in d-hh:mm or hh:mm:ss format
+#SBATCH --time=3-00:00 # walltime in d-hh:mm or hh:mm:ss format
 #SBATCH --account=def-lilimou 
 #SBATCH --gres=gpu:1 # GPUs per node
-#SBATCH --output=slurm-logs/slurm-%j-wmt-student-predistill-forward.out
+#SBATCH --output=slurm-logs/slurm-%j-wmt-student-predistill-forward-deeper.out
 
 nvidia-smi
 
@@ -20,7 +20,7 @@ python distillation.py \
   --adafactor \
   --data_dir wmt_en-ro_100k \
   --tokenizer_name $TEACHER \
-  --student_decoder_layers 1 --student_encoder_layers 3 \
+  --student_decoder_layers 4 --student_encoder_layers 4 \
   --learning_rate=1e-3 \
   --freeze_embeds \
   --temperature 2. \
