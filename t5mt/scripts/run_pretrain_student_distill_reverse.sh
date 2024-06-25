@@ -2,18 +2,16 @@
 
 #SBATCH --cpus-per-task=4 # number of cores
 #SBATCH --mem=32000 # 100M for the whole job 
-#SBATCH --time=7-00:00 # walltime in d-hh:mm or hh:mm:ss format
+#SBATCH --time=3-00:00 # walltime in d-hh:mm or hh:mm:ss format
 #SBATCH --account=def-lilimou 
 #SBATCH --gres=gpu:1 # GPUs per node
-#SBATCH --output=slurm-logs/slurm-%j-wmt-student-predistill-reverse.out
+#SBATCH --output=slurm-logs/slurm-%j-wmt-student-predistill-reverse-deeper.out
 
 nvidia-smi
 
 export TEACHER=models/wmt-teacher-t5-base/best_tfmr
 export OUTPUT_NAME=student-predistill-reverse-$(date +%m-%d-%y--%T)
-# export TMP_OUTPUT_PATH=$SLURM_TMPDIR/$OUTPUT_NAME
 export MODEL_OUTPUT_PATH=runs/$OUTPUT_NAME
-
 
 python distillation.py \
   --teacher $TEACHER \
@@ -40,4 +38,3 @@ python distillation.py \
 
 
 
-# mv $TMP_OUTPUT_PATH $MODEL_OUTPUT_PATH
