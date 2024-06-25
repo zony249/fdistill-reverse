@@ -3,16 +3,15 @@
 
 #SBATCH --cpus-per-task=4 # number of cores
 #SBATCH --mem=32000 # 100M for the whole job 
-#SBATCH --time=3-00:00 # walltime in d-hh:mm or hh:mm:ss format
-#SBATCH --account=def-lilimou 
+#SBATCH --time=7-00:00 # walltime in d-hh:mm or hh:mm:ss format
+#SBATCH --account=rrg-lilimou 
 #SBATCH --gres=gpu:1 # GPUs per node
-#SBATCH --output=slurm-logs/slurm-%j-xsum-student-predistill-forward.out
+#SBATCH --output=slurm-logs/slurm-%j-xsum-student-mle.out
 
 nvidia-smi
 
-export EXP_NAME=$(date +%d-%m-%y--%T)--xsum-student-predistill-forward
-export MODEL_SAVE_DIR=runs/
-export TMP_OUTPUT_PATH=$SLURM_TMPDIR/$EXP_NAME
+export EXP_NAME=$(date +%m-%d-%y--%T)--xsum-student-mle
+export MODEL_SAVE_DIR=runs/$EXP_NAME
 
 python distillation.py \
   --teacher facebook/bart-large-xsum \
@@ -27,13 +26,11 @@ python distillation.py \
   --val_check_interval 0.3 --n_val -1 --eval_beams 2 --length_penalty=0.5 \
   --max_target_length=60 --val_max_target_length=60 --test_max_target_length=100 \
   --model_name_or_path IGNORED \
-  --alpha_hid=3. \
-  --train_batch_size=16 --eval_batch_size=8 --gradient_accumulation_steps=1 \
+  --alpha_hid=0. --alpha_ce=0. --alpha_mlm=1.\
+  --train_batch_size=16 --eval_batch_size=16 --gradient_accumulation_steps=1 \
   --sortish_sampler \
   --num_train_epochs=40 \
   --warmup_steps 500 \
-  --output_dir $TMP_OUTPUT_PATH \
+  --output_dir $MODEL_SAVE_DIR \
   --overwrite_output_dir \
   "$@"
-
-mv $TMP_OUTPUT_PATH $MODEL_OUTPUT_PATH
