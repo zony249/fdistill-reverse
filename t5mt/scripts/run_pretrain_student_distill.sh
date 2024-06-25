@@ -11,8 +11,8 @@ nvidia-smi
 
 export TEACHER=models/wmt-teacher-t5-base/best_tfmr
 export OUTPUT_NAME=student-predistill-forward-$(date +%m-%d-%y--%T)
-export TMP_OUTPUT_PATH=$SLURM_TMPDIR/$OUTPUT_NAME
-export MODEL_OUTPUT_PATH=$SCRATCH/fdistill-reverse/runs
+# export TMP_OUTPUT_PATH=$SLURM_TMPDIR/$OUTPUT_NAME
+export MODEL_OUTPUT_PATH=runs/$(date +%m-%d-%y--%T)--student-predistill-forward-deeper
 
 python distillation.py \
   --teacher $TEACHER \
@@ -20,7 +20,7 @@ python distillation.py \
   --adafactor \
   --data_dir wmt_en-ro_100k \
   --tokenizer_name $TEACHER \
-  --student_decoder_layers 1 --student_encoder_layers 3 \
+  --student_decoder_layers 3 --student_encoder_layers 3 \
   --learning_rate=1e-3 \
   --freeze_embeds \
   --temperature 2. \
@@ -32,10 +32,10 @@ python distillation.py \
   --alpha_hid=3.\
   --train_batch_size=8 --eval_batch_size=8 --gradient_accumulation_steps=1 \
   --warmup_steps 500\
-  --output_dir $TMP_OUTPUT_PATH \
+  --output_dir $MODEL_OUTPUT_PATH \
   --overwrite_output_dir\
   "$@"
 
 
 
-mv $TMP_OUTPUT_PATH $MODEL_OUTPUT_PATH
+# mv $TMP_OUTPUT_PATH $MODEL_OUTPUT_PATH

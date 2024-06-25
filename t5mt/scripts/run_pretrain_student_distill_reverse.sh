@@ -21,7 +21,7 @@ python distillation.py \
   --adafactor \
   --data_dir wmt_en-ro_100k \
   --tokenizer_name $TEACHER \
-  --student_decoder_layers 4 --student_encoder_layers 4 \
+  --student_decoder_layers 3 --student_encoder_layers 3 \
   --learning_rate=1e-3 \
   --freeze_embeds \
   --temperature 2. \

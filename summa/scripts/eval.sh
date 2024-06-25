@@ -10,7 +10,7 @@
 
 nvidia-smi
 
-export MODEL_NAME=facebook/bart-large-xsum
+export MODEL_NAME=models/06-19-24--22:57:21--xsum-student-mle/best_tfmr
 echo $MODEL_NAME
 export BEAM=6
 export SAVE_PATH=runs/pred-$(date +%m-%d-%y--%T)-teacher-eval

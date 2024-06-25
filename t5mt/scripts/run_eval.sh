@@ -8,12 +8,11 @@
 #SBATCH --gres=gpu:1 # GPUs per node
 #SBATCH --output=slurm-logs/slurm-%j-wmt-student-js-eval.out
 
-export MODEL_NAME=$SCRATCH/fdistill-reverse/runs/student-js-05-27-24--11:33:39/best_tfmr
+export MODEL_NAME=models/student-mle-reverse-deep-06-21-24--16:09:16/best_tfmr
 echo $MODEL_NAME
 export BEAM=5
-export OUTPUT=$SCRATCH/fdistill-reverse/evals/pred-$(date +%m-%d-%y)
+export OUTPUT=runs/pred-$(date +%m-%d-%y--%T)
 
-mkdir $SCRATCH/fdistill-reverse/evals
 
 python3 run_eval.py \
   --model_name $MODEL_NAME \

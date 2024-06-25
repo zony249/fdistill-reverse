@@ -1,10 +1,10 @@
 export KL_METHOD='js'
-export SAVE_MODEL=''
-export INIT_MODEL=''
-export TEACHER_MODEL=''
-export DATA_DIR=''
+export SAVE_MODEL=runs/$(date +%m-%d-%y--%T)--xsum-student-js-forward
+export INIT_MODEL=models/xsum-student-predistill
+export TEACHER_MODEL=facebook/bart-large-xsum
+export DATA_DIR=xsum
 
-python ../kd.py \
+python kd.py \
   --teacher $TEACHER_MODEL\
   --data_dir $DATA_DIR\
   --tokenizer_name $TEACHER_MODEL \
@@ -21,7 +21,7 @@ python ../kd.py \
   --max_target_length=60 --val_max_target_length=60 --test_max_target_length=100 \
   --train_batch_size=8 --eval_batch_size=5 --gradient_accumulation_steps=2 \
   --warmup_steps 100 \
-  --output_dir '' \
+  --output_dir $SAVE_MODEL \
   --overwrite_output_dir\
   --kd_method $KL_METHOD\
   --num_train_epochs 12\

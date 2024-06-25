@@ -1,7 +1,23 @@
-python ../distillation.py \
-  --teacher '' \
-  --data_dir '' \
-  --tokenizer_name '' \
+#!/bin/bash 
+
+#SBATCH --cpus-per-task=4 # number of cores
+#SBATCH --mem=32000 # 100M for the whole job 
+#SBATCH --time=3-00:00 # walltime in d-hh:mm or hh:mm:ss format
+#SBATCH --account=def-lilimou 
+#SBATCH --gres=gpu:1 # GPUs per node
+#SBATCH --output=slurm-logs/slurm-%j-student-mle.out
+
+nvidia-smi
+
+export TEACHER=models/dart-teacher-regularized/best_tfmr
+export EXP_NAME=student-mle-$(date +%m-%d-%y--%T)
+export OUTPUT=runs/$EXP_NAME
+
+
+python distillation.py \
+  --teacher $TEACHER \
+  --data_dir dart \
+  --tokenizer_name $TEACHER \
   --student_decoder_layers 1 --student_encoder_layers 3 \
   --learning_rate=1e-4 \
   --freeze_embeds \
@@ -14,6 +30,6 @@ python ../distillation.py \
   --train_batch_size=8 --eval_batch_size=8 --gradient_accumulation_steps=1 \
   --num_train_epochs=18 \
   --warmup_steps 100\
-  --output_dir '' \
+  --output_dir  \
   --overwrite_output_dir\
   "$@"

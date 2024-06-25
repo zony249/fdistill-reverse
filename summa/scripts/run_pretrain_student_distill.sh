@@ -19,7 +19,7 @@ python distillation.py \
   --tokenizer_name facebook/bart-large-xsum \
   --student_decoder_layers 3 --student_encoder_layers 3 \
   --freeze_embeds \
-  --learning_rate=3e-4 \
+  --learning_rate=5e-4 \
   --temperature 2.\
   --do_train \
   --gpus 1\
@@ -27,10 +27,10 @@ python distillation.py \
   --max_target_length=60 --val_max_target_length=60 --test_max_target_length=100 \
   --model_name_or_path IGNORED \
   --alpha_hid=3. \
-  --train_batch_size=8 --eval_batch_size=8 --gradient_accumulation_steps=2 \
+  --train_batch_size=16 --eval_batch_size=8 --gradient_accumulation_steps=1 \
   --sortish_sampler \
-  --num_train_epochs=28\
+  --num_train_epochs=40 \
   --warmup_steps 500 \
-  --output_dir '' \
-  --overwrite_output_dir\
-  "$@"
+  --output_dir $MODEL_SAVE_DIR \
+  --overwrite_output_dir \
+  --reverse \
