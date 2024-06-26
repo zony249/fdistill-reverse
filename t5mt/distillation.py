@@ -46,7 +46,8 @@ class SummarizationDistiller(TranslationModule):
             e_layer_ids, d_layer_ids = None, None
         else:
             student, e_layer_ids, d_layer_ids = create_student_by_copying_alternating_layers(
-                teacher, e=hparams.student_encoder_layers, d=hparams.student_decoder_layers, save_path=save_dir, reverse=hparams.reverse
+                teacher, e=hparams.student_encoder_layers, d=hparams.student_decoder_layers, save_path=save_dir, 
+                reverse_encoder=hparams.reverse_encoder, reverse_decoder=hparams.reverse_decoder, copy_same_order=hparams.copy_same_order
             )
 
         if hparams.length_penalty != -1:
@@ -103,10 +104,11 @@ class SummarizationDistiller(TranslationModule):
             self.e_matches = None
             self.d_matches = None
 
-        print("Encoder Layers Copied:", self.e_layer_ids)
-        print("Decoder Layers Copied:", self.d_layer_ids)
         print("Encoder Layers Supervised:", self.e_matches)
         print("Decoder Layers Supervised:", self.d_matches)
+
+        print("========== STUDENT ARCHITECTURE ===========")
+        print(student)
 
         self.ce_loss_fct = nn.KLDivLoss(reduction="batchmean")
         self.temperature = hparams.temperature
@@ -269,7 +271,9 @@ def add_distill_args(parser):
     parser.add_argument("--supervise_forward", action="store_true", default=False)
     parser.add_argument("--normalize_hidden", action="store_true", default=False)
     parser.add_argument("--temperature", default=1., type=float)
-    parser.add_argument("--reverse", action="store_true", default=False)
+    parser.add_argument("--reverse_encoder", action="store_true", default=False)
+    parser.add_argument("--reverse_decoder", action="store_true", default=False)
+    parser.add_argument("--copy_same_order", action="store_true", default=False, help="whether to copy the layers in same order as matching, or maintain consecutive order copying")
 
 
 class TranslationDistiller(SummarizationDistiller):
