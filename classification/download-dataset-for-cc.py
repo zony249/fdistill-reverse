@@ -60,7 +60,9 @@ task_to_keys = {
 
 
 def main():
-    [load_dataset("nyu-mll/glue", x, cache_dir="glue") for x in task_to_keys.keys()]
+    [load_dataset("nyu-mll/glue", x, cache_dir="glue_dataset") for x in task_to_keys.keys()]
+    # mets = [load_metric("glue", x, cache_dir="glue_dataset") for x in task_to_keys.keys()]
+    # print(mets)
 
 def _mp_fn(index):
     # For xla_spawn (TPUs)
