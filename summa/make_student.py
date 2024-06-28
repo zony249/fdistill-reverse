@@ -14,7 +14,10 @@ logger = logging.get_logger(__name__)
 
 
 def copy_layers(src_layers: nn.ModuleList, dest_layers: nn.ModuleList, layers_to_copy: List[int]) -> None:
+    print("Layer copy order:", layers_to_copy)
+    # layers_to_copy = nn.ModuleList([src_layers[i] for i in layers_to_copy])
     layers_to_copy = deepcopy(nn.ModuleList([src_layers[i] for i in layers_to_copy]))
+    # print(layers_to_copy)
     assert len(dest_layers) == len(layers_to_copy), f"{len(dest_layers)} != {len(layers_to_copy)}"
     # dest_layers.load_state_dict(layers_to_copy.state_dict())
     dest_layers = layers_to_copy
@@ -86,7 +89,9 @@ def create_student_by_copying_alternating_layers(
     copy_first_teacher_layers=False,
     e_layers_to_copy=None,
     d_layers_to_copy=None,
-    reverse=False, 
+    reverse_encoder=False, 
+    reverse_decoder=False, 
+    copy_same_order=False, 
     **extra_config_kwargs
 ) -> Tuple[PreTrainedModel, List[int], List[int]]:
     """Make a student by copying alternating layers from a teacher, save it to save_path.
@@ -153,16 +158,34 @@ def create_student_by_copying_alternating_layers(
     if d_layers_to_copy is None:
         d_layers_to_copy: List[int] = pick_layers_to_copy(d, teacher_d)
 
-    if reverse:
+    if reverse_encoder:
         e_layers_to_copy = e_layers_to_copy[::-1]
+    if reverse_decoder:
         d_layers_to_copy = d_layers_to_copy[::-1]
 
     try:
-        student.model.encoder.layers = copy_layers(teacher.model.encoder.layers, student.model.encoder.layers, e_layers_to_copy)
-        student.model.decoder.layers = copy_layers(teacher.model.decoder.layers, student.model.decoder.layers, d_layers_to_copy)
+        if copy_same_order:
+            print("Copying encoder layers...")
+            student.model.encoder.layers = copy_layers(teacher.model.encoder.layers, student.model.encoder.layers, e_layers_to_copy)
+            print("Copying decoder layers...")
+            student.model.decoder.layers = copy_layers(teacher.model.decoder.layers, student.model.decoder.layers, d_layers_to_copy)
+        else: 
+            print("Copying encoder layers...")
+            student.model.encoder.layers = copy_layers(teacher.model.encoder.layers, student.model.encoder.layers, sorted(e_layers_to_copy))
+            print("Copying decoder layers...")
+            student.model.decoder.layers = copy_layers(teacher.model.decoder.layers, student.model.decoder.layers, sorted(d_layers_to_copy))
     except AttributeError:  # For t5, student.model.encoder.layers is called student.encoder.block
-        student.encoder.block = copy_layers(teacher.encoder.block, student.encoder.block, e_layers_to_copy)
-        student.decoder.block = copy_layers(teacher.decoder.block, student.decoder.block, d_layers_to_copy)
+        if copy_same_order:
+            print("Copying encoder layers...")
+            student.encoder.block = copy_layers(teacher.encoder.block, student.encoder.block, e_layers_to_copy)
+            print("Copying decoder layers...")
+            student.decoder.block = copy_layers(teacher.decoder.block, student.decoder.block, d_layers_to_copy)
+        else: 
+            print("Copying encoder layers...")
+            student.encoder.block = copy_layers(teacher.encoder.block, student.encoder.block, sorted(e_layers_to_copy))
+            print("Copying decoder layers...")
+            student.decoder.block = copy_layers(teacher.decoder.block, student.decoder.block, sorted(d_layers_to_copy))
+            
     logger.info(
         f"Copied encoder layers {e_layers_to_copy} and decoder layers {d_layers_to_copy}. Saving them to {save_path}"
     )
@@ -173,6 +196,8 @@ def create_student_by_copying_alternating_layers(
     )
     student.save_pretrained(save_path)
     # Save information about copying for easier reproducibility
+
+    
 
     return student, e_layers_to_copy, d_layers_to_copy
 
