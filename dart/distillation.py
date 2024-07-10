@@ -19,6 +19,7 @@ from transformers import AutoModelForSeq2SeqLM, MBartTokenizer, T5ForConditional
 from transformers.models.bart.modeling_bart import shift_tokens_right
 from utils import calculate_bleu, check_output_dir, freeze_params, label_smoothed_nll_loss, use_task_specific_params
 
+
 # need the parent dir module
 sys.path.insert(2, str(Path(__file__).resolve().parents[1]))
 from lightning_base import generic_train  # noqa
@@ -37,6 +38,7 @@ class SummarizationDistiller(SummarizationModule):
 
         hparams.model_name_or_path = str(save_dir)  # Tell lightning we are training the student
         teacher = AutoModelForSeq2SeqLM.from_pretrained(hparams.teacher).eval()
+
         use_task_specific_params(teacher, hparams.task)  # We copy good generation parameters to student by default
         if hparams.student is not None:
             student = AutoModelForSeq2SeqLM.from_pretrained(hparams.student)
@@ -44,7 +46,8 @@ class SummarizationDistiller(SummarizationModule):
             e_layer_ids, d_layer_ids = None, None
         else:
             student, e_layer_ids, d_layer_ids = create_student_by_copying_alternating_layers(
-                teacher, e=hparams.student_encoder_layers, d=hparams.student_decoder_layers, save_path=save_dir, reverse=hparams.reverse
+                teacher, e=hparams.student_encoder_layers, d=hparams.student_decoder_layers, save_path=save_dir, 
+                reverse_encoder=hparams.reverse_encoder, reverse_decoder=hparams.reverse_decoder, copy_same_order=hparams.copy_same_order
             )
 
         if hparams.length_penalty != -1:
@@ -100,6 +103,12 @@ class SummarizationDistiller(SummarizationModule):
         else:
             self.e_matches = None
             self.d_matches = None
+
+        print("Encoder Layers Supervised:", self.e_matches)
+        print("Decoder Layers Supervised:", self.d_matches)
+
+        print("========== STUDENT ARCHITECTURE ===========")
+        print(student)
 
         self.ce_loss_fct = nn.KLDivLoss(reduction="batchmean")
         self.temperature = hparams.temperature
@@ -258,10 +267,12 @@ def add_distill_args(parser):
     parser.add_argument("--student_encoder_layers", default=12, type=int, required=False)
     parser.add_argument("--no_teacher", action="store_true", default=False)
     parser.add_argument("--length_penalty", type=float, default=-1)
-    parser.add_argument("--temperature", type=float, default=1.)
     parser.add_argument("--supervise_forward", action="store_true", default=False)
     parser.add_argument("--normalize_hidden", action="store_true", default=False)
-    parser.add_argument("--reverse", action="store_true", default=False)
+    parser.add_argument("--temperature", type=float, default=1.)
+    parser.add_argument("--reverse_encoder", action="store_true", default=False)
+    parser.add_argument("--reverse_decoder", action="store_true", default=False)
+    parser.add_argument("--copy_same_order", action="store_true", default=False, help="whether to copy the layers in same order as matching, or maintain consecutive order copying")
 
 
 class TranslationDistiller(SummarizationDistiller):
