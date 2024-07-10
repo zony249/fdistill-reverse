@@ -224,10 +224,6 @@ class SummarizationDistiller(TranslationModule):
             + self.alpha_mlm * student_lm_loss
             + self.hparams.alpha_hid * (hid_loss_enc + hid_loss_dec)
         )
-        #print('ce', loss_ce)
-        #print('lm', student_lm_loss)
-        #print('hid enc', hid_loss_enc)
-        #print('hid dec', hid_loss_dec)
         return blended_loss, loss_ce, student_lm_loss, hid_loss_enc, hid_loss_dec
 
     @staticmethod
