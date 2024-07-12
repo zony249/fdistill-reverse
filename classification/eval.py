@@ -20,12 +20,23 @@ import os
 import random
 import sys
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Optional, List, Union, Dict, Tuple, Any
+import time
 
 import numpy as np
 from datasets import load_dataset, load_metric
+import torch 
+from torch import nn
+from torch.utils.data import Dataset, DataLoader, SequentialSampler
+import collections
+from argparse import ArgumentParser, Namespace
+import torch.distributed as dist
+from torch.cuda.amp import autocast
+import inspect
+
 
 import transformers
+import datasets
 from transformers import (
     AutoConfig,
     AutoModelForSequenceClassification,
@@ -34,13 +45,39 @@ from transformers import (
     EvalPrediction,
     HfArgumentParser,
     PretrainedConfig,
+    Trainer,
     TrainingArguments,
     default_data_collator,
     set_seed,
 )
-from transformers.trainer_utils import get_last_checkpoint, is_main_process
+from transformers.trainer_utils import (
+    get_last_checkpoint, 
+    is_main_process, 
+    PredictionOutput, 
+    speed_metrics
+)
+from transformers.models.auto.modeling_auto import MODEL_FOR_QUESTION_ANSWERING_MAPPING
+from transformers.file_utils import ( 
+    is_datasets_available
+)
+
 from glue_metrics import Glue
 
+from transformers.trainer_pt_utils import (
+    DistributedLengthGroupedSampler,
+    DistributedTensorGatherer,
+    LabelSmoother,
+    LengthGroupedSampler,
+    SequentialDistributedSampler,
+    distributed_broadcast_scalars,
+    distributed_concat,
+    nested_concat,
+    nested_detach,
+    nested_numpify,
+    nested_xla_mesh_reduce,
+    reissue_pt_warnings,
+)
+from transformers.data.data_collator import DataCollator, DataCollatorWithPadding, default_data_collator
 
 task_to_keys = {
     "cola": ("sentence", None),
@@ -53,9 +90,6 @@ task_to_keys = {
     "stsb": ("sentence1", "sentence2"),
     "wnli": ("sentence1", "sentence2"),
 }
-
-from trainer import Trainer
-
 
 logger = logging.getLogger(__name__)
 
@@ -151,6 +185,8 @@ class ModelArguments:
     )
 
 
+
+
 def main():
     # See all possible arguments in src/transformers/training_args.py
     # or by passing the --help flag to this script.
@@ -224,16 +260,16 @@ def main():
 
         # Get the test dataset: you can provide your own CSV/JSON test file (see below)
         # when you use `do_predict` without specifying a GLUE benchmark task.
-        if training_args.do_predict:
-            if data_args.test_file is not None:
-                train_extension = data_args.train_file.split(".")[-1]
-                test_extension = data_args.test_file.split(".")[-1]
-                assert (
-                    test_extension == train_extension
-                ), "`test_file` should have the same extension (csv or json) as `train_file`."
-                data_files["test"] = data_args.test_file
-            else:
-                raise ValueError("Need either a GLUE task or a test file for `do_predict`.")
+        # if training_args.do_predict:
+        if data_args.test_file is not None:
+            train_extension = data_args.train_file.split(".")[-1]
+            test_extension = data_args.test_file.split(".")[-1]
+            assert (
+                test_extension == train_extension
+            ), "`test_file` should have the same extension (csv or json) as `train_file`."
+            data_files["test"] = data_args.test_file
+        else:
+            raise ValueError("Need either a GLUE task or a test file for `do_predict`.")
 
         for key in data_files.keys():
             logger.info(f"load a local file for {key}: {data_files[key]}")
@@ -299,15 +335,7 @@ def main():
     if data_args.task_name is not None:
         sentence1_key, sentence2_key = task_to_keys[data_args.task_name]
     else:
-        # Again, we try to have some nice defaults but don't hesitate to tweak to your use case.
-        non_label_column_names = [name for name in datasets["train"].column_names if name != "label"]
-        if "sentence1" in non_label_column_names and "sentence2" in non_label_column_names:
-            sentence1_key, sentence2_key = "sentence1", "sentence2"
-        else:
-            if len(non_label_column_names) >= 2:
-                sentence1_key, sentence2_key = non_label_column_names[:2]
-            else:
-                sentence1_key, sentence2_key = non_label_column_names[0], None
+        raise ValueError("task_name must be defined")
 
     # Padding strategy
     if data_args.pad_to_max_length:
@@ -395,87 +423,90 @@ def main():
         args=training_args,
         train_dataset=train_dataset,
         eval_dataset=eval_dataset if training_args.do_eval else None,
-        compute_metrics=compute_metrics,
+        # compute_metrics=compute_metrics,
         tokenizer=tokenizer,
         data_collator=data_collator,
     )
 
-    # Training
-    if training_args.do_train:
-        if last_checkpoint is not None:
-            checkpoint = last_checkpoint
-        elif os.path.isdir(model_args.model_name_or_path):
-            checkpoint = model_args.model_name_or_path
-        else:
-            checkpoint = None
-        train_result = trainer.train(resume_from_checkpoint=checkpoint)
-        metrics = train_result.metrics
+    print("Remove unused columns:", training_args.remove_unused_columns)
 
-        trainer.save_model()  # Saves the tokenizer too for easy upload
+    # # Training
+    # if training_args.do_train:
+    #     if last_checkpoint is not None:
+    #         checkpoint = last_checkpoint
+    #     elif os.path.isdir(model_args.model_name_or_path):
+    #         checkpoint = model_args.model_name_or_path
+    #     else:
+    #         checkpoint = None
+    #     train_result = trainer.train(resume_from_checkpoint=checkpoint)
+    #     metrics = train_result.metrics
 
-        output_train_file = os.path.join(training_args.output_dir, "train_results.txt")
-        if trainer.is_world_process_zero():
-            with open(output_train_file, "w") as writer:
-                logger.info("***** Train results *****")
-                for key, value in sorted(metrics.items()):
-                    logger.info(f"  {key} = {value}")
-                    writer.write(f"{key} = {value}\n")
+    #     trainer.save_model()  # Saves the tokenizer too for easy upload
 
-            # Need to save the state, since Trainer.save_model saves only the tokenizer with the model
-            trainer.state.save_to_json(os.path.join(training_args.output_dir, "trainer_state.json"))
+    #     output_train_file = os.path.join(training_args.output_dir, "train_results.txt")
+    #     if trainer.is_world_process_zero():
+    #         with open(output_train_file, "w") as writer:
+    #             logger.info("***** Train results *****")
+    #             for key, value in sorted(metrics.items()):
+    #                 logger.info(f"  {key} = {value}")
+    #                 writer.write(f"{key} = {value}\n")
 
-    # Evaluation
+    #         # Need to save the state, since Trainer.save_model saves only the tokenizer with the model
+    #         trainer.state.save_to_json(os.path.join(training_args.output_dir, "trainer_state.json"))
+
+    # # Evaluation
     eval_results = {}
-    if training_args.do_eval:
-        logger.info("*** Evaluate ***")
+    # if training_args.do_eval:
+    #     logger.info("*** Evaluate ***")
 
-        # Loop to handle MNLI double evaluation (matched, mis-matched)
-        tasks = [data_args.task_name]
-        eval_datasets = [eval_dataset]
-        if data_args.task_name == "mnli":
-            tasks.append("mnli-mm")
-            eval_datasets.append(datasets["validation_mismatched"])
+    #     # Loop to handle MNLI double evaluation (matched, mis-matched)
+    #     tasks = [data_args.task_name]
+    #     eval_datasets = [eval_dataset]
+    #     if data_args.task_name == "mnli":
+    #         tasks.append("mnli-mm")
+    #         eval_datasets.append(datasets["validation_mismatched"])
 
-        for eval_dataset, task in zip(eval_datasets, tasks):
-            eval_result = trainer.evaluate(eval_dataset=eval_dataset)
+    #     for eval_dataset, task in zip(eval_datasets, tasks):
+    #         eval_result = trainer.evaluate(eval_dataset=eval_dataset)
 
-            output_eval_file = os.path.join(training_args.output_dir, f"eval_results_{task}.txt")
-            if trainer.is_world_process_zero():
-                with open(output_eval_file, "w") as writer:
-                    logger.info(f"***** Eval results {task} *****")
-                    for key, value in sorted(eval_result.items()):
-                        logger.info(f"  {key} = {value}")
-                        writer.write(f"{key} = {value}\n")
+    #         output_eval_file = os.path.join(training_args.output_dir, f"eval_results_{task}.txt")
+    #         if trainer.is_world_process_zero():
+    #             with open(output_eval_file, "w") as writer:
+    #                 logger.info(f"***** Eval results {task} *****")
+    #                 for key, value in sorted(eval_result.items()):
+    #                     logger.info(f"  {key} = {value}")
+    #                     writer.write(f"{key} = {value}\n")
 
-            eval_results.update(eval_result)
+    #         eval_results.update(eval_result)
 
-    if training_args.do_predict:
-        logger.info("*** Test ***")
+    # if training_args.do_predict:
+    logger.info("*** Test ***")
 
-        # Loop to handle MNLI double evaluation (matched, mis-matched)
-        tasks = [data_args.task_name]
-        test_datasets = [test_dataset]
-        if data_args.task_name == "mnli":
-            tasks.append("mnli-mm")
-            test_datasets.append(datasets["test_mismatched"])
+    # Loop to handle MNLI double evaluation (matched, mis-matched)
+    tasks = [data_args.task_name]
+    test_datasets = [test_dataset]
+    if data_args.task_name == "mnli":
+        tasks.append("mnli-mm")
+        test_datasets.append(datasets["test_mismatched"])
 
-        for test_dataset, task in zip(test_datasets, tasks):
-            # Removing the `label` columns because it contains -1 and Trainer won't like that.
-            test_dataset.remove_columns("label")
-            predictions = trainer.predict(test_dataset=test_dataset).predictions
-            predictions = np.squeeze(predictions) if is_regression else np.argmax(predictions, axis=1)
+    for test_dataset, task in zip(test_datasets, tasks):
+        # Removing the `label` columns because it contains -1 and Trainer won't like that.
+        test_dataset = test_dataset.remove_columns("label")
+        # predictions = predict(test_dataset=test_dataset, model=model, tokenizer=tokenizer, args=training_args).predictions
+        predictions = trainer.predict(test_dataset=test_dataset).predictions
+        predictions = np.squeeze(predictions) if is_regression else np.argmax(predictions, axis=1)
 
-            output_test_file = os.path.join(training_args.output_dir, f"test_results_{task}.txt")
-            if trainer.is_world_process_zero():
-                with open(output_test_file, "w") as writer:
-                    logger.info(f"***** Test results {task} *****")
-                    writer.write("index\tprediction\n")
-                    for index, item in enumerate(predictions):
-                        if is_regression:
-                            writer.write(f"{index}\t{item:3.3f}\n")
-                        else:
-                            item = label_list[item]
-                            writer.write(f"{index}\t{item}\n")
+        output_test_file = os.path.join(training_args.output_dir, f"test_results_{task}.txt")
+        if trainer.is_world_process_zero():
+            with open(output_test_file, "w") as writer:
+                logger.info(f"***** Test results {task} *****")
+                writer.write("index\tprediction\n")
+                for index, item in enumerate(predictions):
+                    if is_regression:
+                        writer.write(f"{index}\t{item:3.3f}\n")
+                    else:
+                        item = label_list[item]
+                        writer.write(f"{index}\t{item}\n")
     return eval_results
 
 

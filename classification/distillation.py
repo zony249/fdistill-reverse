@@ -21,6 +21,7 @@ import random
 import sys
 from dataclasses import dataclass, field
 from typing import Optional
+from argparse import ArgumentParser, Namespace
 
 import numpy as np
 from datasets import load_dataset, load_metric
@@ -54,7 +55,7 @@ task_to_keys = {
     "wnli": ("sentence1", "sentence2"),
 }
 
-from trainer import Trainer
+from trainer import DistillBertTrainer
 
 
 logger = logging.getLogger(__name__)
@@ -150,19 +151,45 @@ class ModelArguments:
         },
     )
 
+@dataclass
+class DistillationArguments(TrainingArguments): 
+
+    num_student_layers: Optional[int] = field(
+        default=6, 
+        metadata={"help": "Number of layers for student model"})
+
+    alpha_kl: Optional[float] = field(
+        default=1., 
+        metadata={"help": "KL divergence balancer"})
+
+    alpha_mle: Optional[float] = field(
+        default=1., 
+        metadata={"help": "MLE objective balancer"})
+
+    alpha_hidden: Optional[float] = field(
+        default=1., 
+        metadata={"help": "Hidden loss balancer"})
+    
+    reverse: Optional[bool] = field(
+        default=False, 
+        metadata={"help": "Reverse layer matching"})
+
+
 
 def main():
     # See all possible arguments in src/transformers/training_args.py
     # or by passing the --help flag to this script.
     # We now keep distinct sets of args, for a cleaner separation of concerns.
 
-    parser = HfArgumentParser((ModelArguments, DataTrainingArguments, TrainingArguments))
+    parser = HfArgumentParser((ModelArguments, DataTrainingArguments, DistillationArguments))
     if len(sys.argv) == 2 and sys.argv[1].endswith(".json"):
         # If we pass only one argument to the script and it's the path to a json file,
         # let's parse it to get our arguments.
         model_args, data_args, training_args = parser.parse_json_file(json_file=os.path.abspath(sys.argv[1]))
     else:
         model_args, data_args, training_args = parser.parse_args_into_dataclasses()
+
+
 
     # Detecting last checkpoint.
     last_checkpoint = None
@@ -390,8 +417,8 @@ def main():
         data_collator = None
 
     # Initialize our Trainer
-    trainer = Trainer(
-        model=model,
+    trainer = DistillBertTrainer(
+        teacher=model,
         args=training_args,
         train_dataset=train_dataset,
         eval_dataset=eval_dataset if training_args.do_eval else None,
@@ -408,7 +435,7 @@ def main():
             checkpoint = model_args.model_name_or_path
         else:
             checkpoint = None
-        train_result = trainer.train(resume_from_checkpoint=checkpoint)
+        train_result = trainer.train()
         metrics = train_result.metrics
 
         trainer.save_model()  # Saves the tokenizer too for easy upload
@@ -461,7 +488,7 @@ def main():
 
         for test_dataset, task in zip(test_datasets, tasks):
             # Removing the `label` columns because it contains -1 and Trainer won't like that.
-            test_dataset.remove_columns("label")
+            test_dataset = test_dataset.remove_columns("label")
             predictions = trainer.predict(test_dataset=test_dataset).predictions
             predictions = np.squeeze(predictions) if is_regression else np.argmax(predictions, axis=1)
 
