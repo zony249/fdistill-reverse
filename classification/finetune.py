@@ -21,6 +21,7 @@ import random
 import sys
 from dataclasses import dataclass, field
 from typing import Optional
+from argparse import ArgumentParser, Namespace
 
 import numpy as np
 from datasets import load_dataset, load_metric
@@ -58,6 +59,27 @@ from trainer import Trainer
 
 
 logger = logging.getLogger(__name__)
+
+class Writer(object):
+    def __init__(self, dir): 
+        self.filename = os.path.join(dir, "logs.txt")
+        self.file = open(self.filename, "w")
+        self.out = sys.stdout 
+
+    def write(self, data):
+        self.out.write(data)
+        self.file.write(data)
+        self.flush()
+
+    def flush(self): 
+        self.out.flush() 
+        self.file.flush()
+
+    def close(self): 
+        self.file.flush() 
+        self.file.close()
+
+
 
 
 @dataclass
@@ -164,6 +186,8 @@ def main():
     else:
         model_args, data_args, training_args = parser.parse_args_into_dataclasses()
 
+
+
     # Detecting last checkpoint.
     last_checkpoint = None
     if os.path.isdir(training_args.output_dir) and training_args.do_train and not training_args.overwrite_output_dir:
@@ -178,6 +202,11 @@ def main():
                 f"Checkpoint detected, resuming training at {last_checkpoint}. To avoid this behavior, change "
                 "the `--output_dir` or add `--overwrite_output_dir` to train from scratch."
             )
+
+    os.makedirs(training_args.output_dir)
+    redir = Writer(training_args.output_dir)
+    sys.stdout = redir
+    sys.stderr = redir
 
     # Setup logging
     logging.basicConfig(
@@ -366,6 +395,14 @@ def main():
     # TODO: When datasets metrics include regular accuracy, make an else here and remove special branch from
     # compute_metrics
 
+
+    if data_args.task_name is None:
+        training_args.metric_for_best_model = "combined_score"
+    elif is_regression:
+        training_args.metric_for_best_model = "mse"
+    else:
+        training_args.metric_for_best_model = "accuracy"
+
     # You can define your custom compute_metrics function. It takes an `EvalPrediction` object (a namedtuple with a
     # predictions and label_ids field) and has to return a dictionary string to float.
     def compute_metrics(p: EvalPrediction):
@@ -461,7 +498,7 @@ def main():
 
         for test_dataset, task in zip(test_datasets, tasks):
             # Removing the `label` columns because it contains -1 and Trainer won't like that.
-            test_dataset.remove_columns("label")
+            test_dataset = test_dataset.remove_columns("label")
             predictions = trainer.predict(test_dataset=test_dataset).predictions
             predictions = np.squeeze(predictions) if is_regression else np.argmax(predictions, axis=1)
 

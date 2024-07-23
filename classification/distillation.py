@@ -60,6 +60,27 @@ from trainer import DistillBertTrainer
 
 logger = logging.getLogger(__name__)
 
+class Writer(object):
+    def __init__(self, dir): 
+        self.filename = os.path.join(dir, "logs.txt")
+        self.file = open(self.filename, "w")
+        self.out = sys.stdout 
+
+    def write(self, data):
+        self.out.write(data)
+        self.file.write(data)
+        self.flush()
+
+    def flush(self): 
+        self.out.flush() 
+        self.file.flush()
+
+    def close(self): 
+        self.file.flush() 
+        self.file.close()
+
+
+
 
 @dataclass
 class DataTrainingArguments:
@@ -205,6 +226,11 @@ def main():
                 f"Checkpoint detected, resuming training at {last_checkpoint}. To avoid this behavior, change "
                 "the `--output_dir` or add `--overwrite_output_dir` to train from scratch."
             )
+
+    os.makedirs(training_args.output_dir)
+    redir = Writer(training_args.output_dir)
+    sys.stdout = redir
+    sys.stderr = redir
 
     # Setup logging
     logging.basicConfig(
@@ -392,6 +418,14 @@ def main():
         metric = Glue(data_args.task_name)
     # TODO: When datasets metrics include regular accuracy, make an else here and remove special branch from
     # compute_metrics
+
+
+    if data_args.task_name is None:
+        training_args.metric_for_best_model = "combined_score"
+    elif is_regression:
+        training_args.metric_for_best_model = "mse"
+    else:
+        training_args.metric_for_best_model = "accuracy"
 
     # You can define your custom compute_metrics function. It takes an `EvalPrediction` object (a namedtuple with a
     # predictions and label_ids field) and has to return a dictionary string to float.

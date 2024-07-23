@@ -26,6 +26,7 @@ import time
 import warnings
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple, Union
+from glue_metrics import Glue
 
 
 # Integrations must be imported before ML frameworks:
@@ -929,6 +930,7 @@ class Trainer:
                     steps_trained_in_current_epoch -= 1
                     continue
 
+
                 if (step + 1) % self.args.gradient_accumulation_steps == 0:
                     self.control = self.callback_handler.on_step_begin(self.args, self.state, self.control)
 
@@ -980,7 +982,11 @@ class Trainer:
                     self.state.epoch = epoch + (step + 1) / steps_in_epoch
                     self.control = self.callback_handler.on_step_end(self.args, self.state, self.control)
 
-                    self._maybe_log_save_evaluate(tr_loss, model, trial, epoch)
+                    # self._maybe_log_save_evaluate(tr_loss, model, trial, epoch)
+
+                if (step + 1) % self.args.eval_steps == 0: 
+                    metrics = self.evaluate(eval_dataset = self.eval_dataset) 
+                    self._save_checkpoint(self.model, None, metrics)
 
                 if self.control.should_epoch_stop or self.control.should_training_stop:
                     break
@@ -1104,7 +1110,6 @@ class Trainer:
             with warnings.catch_warnings(record=True) as caught_warnings:
                 torch.save(self.lr_scheduler.state_dict(), os.path.join(output_dir, "scheduler.pt"))
             reissue_pt_warnings(caught_warnings)
-
         # Determine the new best metric / best model checkpoint
         if metrics is not None and self.args.metric_for_best_model is not None:
             metric_to_check = self.args.metric_for_best_model
@@ -1120,6 +1125,9 @@ class Trainer:
             ):
                 self.state.best_metric = metric_value
                 self.state.best_model_checkpoint = output_dir
+                ## my code 
+                self.model.save_pretrained(os.path.join(self.args.output_dir, "best_tfmr"))
+                self.tokenizer.save_pretrained(os.path.join(self.args.output_dir, "best_tfmr"))
 
         # Save the Trainer state
         if self.is_world_process_zero():
@@ -1600,6 +1608,7 @@ class Trainer:
         logger.info("***** Running %s *****", description)
         logger.info("  Num examples = %d", num_examples)
         logger.info("  Batch size = %d", batch_size)
+        # print("Batch size =", batch_size)
         losses_host: torch.Tensor = None
         preds_host: Union[torch.Tensor, List[torch.Tensor]] = None
         labels_host: Union[torch.Tensor, List[torch.Tensor]] = None
@@ -1627,6 +1636,7 @@ class Trainer:
         self.callback_handler.eval_dataloader = dataloader
 
         for step, inputs in enumerate(dataloader):
+            # print(inputs["input_ids"].shape)
             loss, logits, labels = self.prediction_step(model, inputs, prediction_loss_only, ignore_keys=ignore_keys)
             if loss is not None:
                 losses = loss.repeat(batch_size)
@@ -1765,6 +1775,8 @@ class Trainer:
         else:
             labels = None
 
+        torch.cuda.empty_cache()
+
         return (loss, logits, labels)
 
     def floating_point_ops(self, inputs: Dict[str, Union[torch.Tensor, Any]]):
@@ -1853,7 +1865,7 @@ class DistillBertTrainer(Trainer):
         print("======= STUDENT ARCHITECTURE ========")
         print(self.model)
         print("======= MATCHING STRATEGY =======")
-
+        print(self.args.metric_for_best_model)
 
 
     def init_student_from_teacher(self, teacher: PreTrainedModel, layers_to_copy: List[int]) -> PreTrainedModel: 
@@ -1987,47 +1999,6 @@ class DistillBertTrainer(Trainer):
         return loss.detach()
 
 
-    def compute_loss(self, model, inputs, return_outputs=False):
-        """
-        How the loss is computed by Trainer. By default, all models return the loss in the first element.
-
-        Subclass and override for custom behavior.
-        """
-        if self.label_smoother is not None and "labels" in inputs:
-            labels = inputs.pop("labels")
-        else:
-            labels = None
-        
-        # outputs.logits, outputs.hidden_states, and outputs.loss are the important outputs
-        student_outputs = model(input_ids=inputs["input_ids"], attention_mask=inputs["attention_mask"], labels=inputs["labels"],  output_hidden_states=True)
-
-        with torch.no_grad():
-            teacher_outputs = self.teacher(input_ids=inputs["input_ids"], attention_mask=inputs["attention_mask"], output_hidden_states=True)
-
-
-        if self.compute_hidden_loss: 
-        
-            teacher_hidden, student_hidden = self.get_matching_states(
-                    teacher_hidden=teacher_outputs.hidden_states, 
-                    student_hidden=student_outputs.hidden_states,
-                    layers_matched=self.layer_matching, 
-                    match_embeddings=True)
-            
-            hidden_loss = self._hidden_loss(teacher_states=teacher_hidden, 
-                              student_states=student_hidden, 
-                              attention_mask=inputs.attention_mask)
-        else: 
-            hidden_loss = 0
-        
-        kl_loss = self._kl_loss(teacher_logits=teacher_outputs.logits, 
-                          student_logits=student_outputs.logits, 
-                          attention_mask=inputs.attention_mask, ) if self.compute_kl_loss else 0
-
-        mle_loss = student_outputs.loss if self.compute_mle_loss else 0 
-        
-        return (self.alpha_mle * mle_loss +  
-                self.alpha_kl * kl_loss + 
-                self.alpha_hidden * hidden_loss)
 
 
     def compute_loss(self, model, inputs, return_outputs=False):
