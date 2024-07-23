@@ -182,7 +182,9 @@ class SummarizationDistiller(TranslationModule):
             "encoder_last_hidden_state"
         ]  # use this unless self.different_base_models
         hid_loss_enc, hid_loss_dec = zero_tensor(), zero_tensor()
-        if self.different_encoder:  # compute encoder hidden state loss
+
+        # if self.different_encoder:  # compute encoder hidden state loss
+        if True:
             all_teacher_encoder_outputs = self.teacher.get_encoder()(
                 input_ids,
                 attention_mask=src_mask,
