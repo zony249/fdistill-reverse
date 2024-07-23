@@ -71,7 +71,7 @@ class SummarizationDistiller(TranslationModule):
 
         self.different_base_models = not (hparams.student is None or hparams.teacher == hparams.student)
         self.do_calc_hidden_loss = (not self.different_base_models) and hparams.alpha_hid > 0
-        self.different_encoder = self.different_base_models or (student_encoder_layers != teacher_encoder_layers)
+        self.different_encoder = self.different_base_models or (student_encoder_layers != teacher_encoder_layers) or True
         # self.different_encoder determines whether we need to run the teacher encoder
         self.teacher = teacher
         freeze_params(self.teacher)
