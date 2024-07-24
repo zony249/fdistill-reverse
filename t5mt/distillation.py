@@ -20,6 +20,7 @@ from transformers.models.bart.modeling_bart import shift_tokens_right
 from utils import calculate_bleu, check_output_dir, freeze_params, label_smoothed_nll_loss, use_task_specific_params
 
 
+
 # need the parent dir module
 sys.path.insert(2, str(Path(__file__).resolve().parents[1]))
 from lightning_base import generic_train  # noqa
@@ -234,6 +235,10 @@ class SummarizationDistiller(TranslationModule):
         msg = "expected list or tuple for hidden_states, got tensor of shape: "
         assert not isinstance(hidden_states, torch.Tensor), f"{msg}{hidden_states.shape}"
         assert not isinstance(hidden_states_T, torch.Tensor), f"{msg}{hidden_states_T.shape}"
+
+        # add embedding layer
+        matches = [0] + [i + 1 for i in matches]
+
         mask = attention_mask.to(hidden_states[0])
         valid_count = mask.sum() * hidden_states[0].size(-1)
         if only_the_last:
@@ -315,6 +320,7 @@ def distill_main(args):
     Path(args.output_dir).mkdir(exist_ok=True)
     check_output_dir(args, expected_items=3)
 
+
     model = create_module(args)
     return ft_main(args, model=model)
 
@@ -324,5 +330,8 @@ if __name__ == "__main__":
     parser = pl.Trainer.add_argparse_args(parser)
     parser = TranslationDistiller.add_model_specific_args(parser, os.getcwd())
     args = parser.parse_args()
+
+
+
 
     distill_main(args)
