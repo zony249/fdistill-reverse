@@ -1128,6 +1128,11 @@ class Trainer:
                 ## my code 
                 self.model.save_pretrained(os.path.join(self.args.output_dir, "best_tfmr"))
                 self.tokenizer.save_pretrained(os.path.join(self.args.output_dir, "best_tfmr"))
+                with open(os.path.join(self.args.output_dir, "best_tfmr", "best_eval_res.txt"), "a") as f: 
+                    f.write(f"step: {self.state.global_step}, metric: {self.args.metric_for_best_model}, val: {metric_value}, greater_is_better: {self.args.greater_is_better} \n")
+            with open(os.path.join(self.args.output_dir, "best_tfmr", "all_eval_res.txt"), "a") as f: 
+                f.write(f"step: {self.state.global_step}, metric: {self.args.metric_for_best_model}, val: {metric_value}, greater_is_better: {self.args.greater_is_better} \n")
+
 
         # Save the Trainer state
         if self.is_world_process_zero():

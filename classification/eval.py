@@ -423,7 +423,7 @@ def main():
         args=training_args,
         train_dataset=train_dataset,
         eval_dataset=eval_dataset if training_args.do_eval else None,
-        # compute_metrics=compute_metrics,
+        compute_metrics=compute_metrics,
         tokenizer=tokenizer,
         data_collator=data_collator,
     )
@@ -456,28 +456,28 @@ def main():
 
     # # Evaluation
     eval_results = {}
-    # if training_args.do_eval:
-    #     logger.info("*** Evaluate ***")
+    if training_args.do_eval:
+        logger.info("*** Evaluate ***")
 
-    #     # Loop to handle MNLI double evaluation (matched, mis-matched)
-    #     tasks = [data_args.task_name]
-    #     eval_datasets = [eval_dataset]
-    #     if data_args.task_name == "mnli":
-    #         tasks.append("mnli-mm")
-    #         eval_datasets.append(datasets["validation_mismatched"])
+        # Loop to handle MNLI double evaluation (matched, mis-matched)
+        tasks = [data_args.task_name]
+        eval_datasets = [eval_dataset]
+        if data_args.task_name == "mnli":
+            tasks.append("mnli-mm")
+            eval_datasets.append(datasets["validation_mismatched"])
 
-    #     for eval_dataset, task in zip(eval_datasets, tasks):
-    #         eval_result = trainer.evaluate(eval_dataset=eval_dataset)
+        for eval_dataset, task in zip(eval_datasets, tasks):
+            eval_result = trainer.evaluate(eval_dataset=eval_dataset)
 
-    #         output_eval_file = os.path.join(training_args.output_dir, f"eval_results_{task}.txt")
-    #         if trainer.is_world_process_zero():
-    #             with open(output_eval_file, "w") as writer:
-    #                 logger.info(f"***** Eval results {task} *****")
-    #                 for key, value in sorted(eval_result.items()):
-    #                     logger.info(f"  {key} = {value}")
-    #                     writer.write(f"{key} = {value}\n")
+            output_eval_file = os.path.join(training_args.output_dir, f"eval_results_{task}.txt")
+            if trainer.is_world_process_zero():
+                with open(output_eval_file, "w") as writer:
+                    logger.info(f"***** Eval results {task} *****")
+                    for key, value in sorted(eval_result.items()):
+                        logger.info(f"  {key} = {value}")
+                        writer.write(f"{key} = {value}\n")
 
-    #         eval_results.update(eval_result)
+            eval_results.update(eval_result)
 
     # if training_args.do_predict:
     logger.info("*** Test ***")

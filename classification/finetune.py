@@ -398,10 +398,13 @@ def main():
 
     if data_args.task_name is None:
         training_args.metric_for_best_model = "combined_score"
+        training_args.greater_is_better = True
     elif is_regression:
         training_args.metric_for_best_model = "mse"
+        training_args.greater_is_better = False
     else:
         training_args.metric_for_best_model = "accuracy"
+        training_args.greater_is_better = True
 
     # You can define your custom compute_metrics function. It takes an `EvalPrediction` object (a namedtuple with a
     # predictions and label_ids field) and has to return a dictionary string to float.
