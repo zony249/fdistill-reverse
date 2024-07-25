@@ -20,6 +20,7 @@ from transformers.models.bart.modeling_bart import shift_tokens_right
 from utils import calculate_bleu, check_output_dir, freeze_params, label_smoothed_nll_loss, use_task_specific_params
 
 
+
 # need the parent dir module
 sys.path.insert(2, str(Path(__file__).resolve().parents[1]))
 from lightning_base import generic_train  # noqa
@@ -71,7 +72,7 @@ class SummarizationDistiller(SummarizationModule):
 
         self.different_base_models = not (hparams.student is None or hparams.teacher == hparams.student)
         self.do_calc_hidden_loss = (not self.different_base_models) and hparams.alpha_hid > 0
-        self.different_encoder = self.different_base_models or (student_encoder_layers != teacher_encoder_layers)
+        self.different_encoder = self.different_base_models or (student_encoder_layers != teacher_encoder_layers) or True
         # self.different_encoder determines whether we need to run the teacher encoder
         self.teacher = teacher
         freeze_params(self.teacher)
@@ -182,6 +183,7 @@ class SummarizationDistiller(SummarizationModule):
             "encoder_last_hidden_state"
         ]  # use this unless self.different_base_models
         hid_loss_enc, hid_loss_dec = zero_tensor(), zero_tensor()
+
         # if self.different_encoder:  # compute encoder hidden state loss
         if True:
             all_teacher_encoder_outputs = self.teacher.get_encoder()(
@@ -239,6 +241,10 @@ class SummarizationDistiller(SummarizationModule):
         msg = "expected list or tuple for hidden_states, got tensor of shape: "
         assert not isinstance(hidden_states, torch.Tensor), f"{msg}{hidden_states.shape}"
         assert not isinstance(hidden_states_T, torch.Tensor), f"{msg}{hidden_states_T.shape}"
+
+        # add embedding layer
+        matches = [0] + [i + 1 for i in matches]
+
         mask = attention_mask.to(hidden_states[0])
         valid_count = mask.sum() * hidden_states[0].size(-1)
         student_states = torch.stack([hidden_states[i] for i in range(len(matches))])
