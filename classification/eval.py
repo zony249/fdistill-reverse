@@ -45,7 +45,6 @@ from transformers import (
     EvalPrediction,
     HfArgumentParser,
     PretrainedConfig,
-    Trainer,
     TrainingArguments,
     default_data_collator,
     set_seed,
@@ -78,6 +77,8 @@ from transformers.trainer_pt_utils import (
     reissue_pt_warnings,
 )
 from transformers.data.data_collator import DataCollator, DataCollatorWithPadding, default_data_collator
+
+from trainer import Trainer
 
 task_to_keys = {
     "cola": ("sentence", None),
@@ -252,7 +253,7 @@ def main():
     # download the dataset.
     if data_args.task_name is not None:
         # Downloading and loading a dataset from the hub.
-        datasets = load_dataset("nyu-mll/glue", data_args.task_name, cache_dir="glue_dataset")
+        datasets = load_dataset("glue", data_args.task_name, cache_dir="glue_dataset")
     else:
         # Loading a dataset from your local files.
         # CSV/JSON training and evaluation files are needed.
@@ -330,6 +331,7 @@ def main():
         revision=model_args.model_revision,
         use_auth_token=True if model_args.use_auth_token else None,
     )
+    # print(model.load_state_dict(torch.load(os.path.join(model_args.model_name_or_path, "pytorch_model.bin")), strict=True))
 
     # Preprocessing the datasets
     if data_args.task_name is not None:

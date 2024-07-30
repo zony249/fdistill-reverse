@@ -519,6 +519,8 @@ class Trainer:
             self._remove_unused_columns(eval_dataset, description="evaluation")
         eval_dataset = eval_dataset if eval_dataset is not None else self.eval_dataset
         eval_sampler = self._get_eval_sampler(eval_dataset)
+        
+        print("EVAL_BATCH_SIZE: " , self.args.eval_batch_size)
 
         return DataLoader(
             eval_dataset,
@@ -983,9 +985,9 @@ class Trainer:
                     self.control = self.callback_handler.on_step_end(self.args, self.state, self.control)
 
                     # self._maybe_log_save_evaluate(tr_loss, model, trial, epoch)
-
-                if (step + 1) % self.args.eval_steps == 0: 
+                if (step + 1)  % min(self.args.eval_steps, steps_in_epoch) == 0: 
                     metrics = self.evaluate(eval_dataset = self.eval_dataset) 
+                    print(metrics)
                     self._save_checkpoint(self.model, None, metrics)
 
                 if self.control.should_epoch_stop or self.control.should_training_stop:
@@ -1125,8 +1127,10 @@ class Trainer:
             ):
                 self.state.best_metric = metric_value
                 self.state.best_model_checkpoint = output_dir
-                ## my code 
-                self.model.save_pretrained(os.path.join(self.args.output_dir, "best_tfmr"))
+                ## my code
+                model_device = self.model.device  
+                self.model.cpu().save_pretrained(os.path.join(self.args.output_dir, "best_tfmr"))
+                self.model.to(model_device)
                 self.tokenizer.save_pretrained(os.path.join(self.args.output_dir, "best_tfmr"))
                 with open(os.path.join(self.args.output_dir, "best_tfmr", "best_eval_res.txt"), "a") as f: 
                     f.write(f"step: {self.state.global_step}, metric: {self.args.metric_for_best_model}, val: {metric_value}, greater_is_better: {self.args.greater_is_better} \n")
@@ -1828,7 +1832,7 @@ from transformers import (
 # student number of layers to teacher layer indices
 LAYER_MAP = {
     1: [11], 
-    2: [11, 5],
+    2: [5, 11],
     3: [3, 7, 11], 
     4: [2, 5, 8, 11], 
     6: [1, 3, 5, 7, 9, 11], 
@@ -2056,7 +2060,119 @@ class DistillBertTrainer(Trainer):
         #     # We don't use .loss here since the model may return tuples instead of ModelOutput.
         #     loss = outputs["loss"] if isinstance(outputs, dict) else outputs[0]
 
-        return (loss, student_outputs) if return_outputs else loss
+        return (loss, student_outputs[:2]) if return_outputs else loss
+
+
+
+    def prediction_loop(
+        self,
+        dataloader: DataLoader,
+        description: str,
+        prediction_loss_only: Optional[bool] = None,
+        ignore_keys: Optional[List[str]] = None,
+        metric_key_prefix: str = "eval",
+    ) -> PredictionOutput:
+        """
+        Prediction/evaluation loop, shared by :obj:`Trainer.evaluate()` and :obj:`Trainer.predict()`.
+
+        Works both with or without labels.
+        """
+        if not isinstance(dataloader.dataset, collections.abc.Sized):
+            raise ValueError("dataset must implement __len__")
+        prediction_loss_only = (
+            prediction_loss_only if prediction_loss_only is not None else self.args.prediction_loss_only
+        )
+
+        model = self.model
+        # multi-gpu eval
+        # if self.args.n_gpu > 1:
+        #     model = torch.nn.DataParallel(model)
+        # Note: in torch.distributed mode, there's no point in wrapping the model
+        # inside a DistributedDataParallel as we'll be under `no_grad` anyways.
+
+        batch_size = dataloader.batch_size
+        num_examples = self.num_examples(dataloader)
+        logger.info("***** Running %s *****", description)
+        logger.info("  Num examples = %d", num_examples)
+        logger.info("  Batch size = %d", batch_size)
+        # print("Batch size =", batch_size)
+        losses_host: torch.Tensor = None
+        preds_host: Union[torch.Tensor, List[torch.Tensor]] = None
+        labels_host: Union[torch.Tensor, List[torch.Tensor]] = None
+
+        world_size = 1
+        # if is_torch_tpu_available() and False:
+        #     world_size = xm.xrt_world_size()
+        if self.args.local_rank != -1:
+            world_size = dist.get_world_size()
+        world_size = max(1, world_size)
+
+        eval_losses_gatherer = DistributedTensorGatherer(world_size, num_examples, make_multiple_of=batch_size)
+        if not prediction_loss_only:
+            preds_gatherer = DistributedTensorGatherer(world_size, num_examples)
+            labels_gatherer = DistributedTensorGatherer(world_size, num_examples)
+
+        model.eval()
+
+        # if is_torch_tpu_available():
+        #     dataloader = pl.ParallelLoader(dataloader, [self.args.device]).per_device_loader(self.args.device)
+        #
+        # if self.args.past_index >= 0:
+        #     self._past = None
+
+        self.callback_handler.eval_dataloader = dataloader
+
+        for step, inputs in enumerate(dataloader):
+            # print(inputs["input_ids"].shape)
+            loss, logits, labels = self.prediction_step(model, inputs, prediction_loss_only, ignore_keys=ignore_keys)
+            if loss is not None:
+                losses = loss.repeat(batch_size)
+                losses_host = losses if losses_host is None else torch.cat((losses_host, losses), dim=0)
+            if logits is not None:
+                preds_host = logits if preds_host is None else nested_concat(preds_host, logits, padding_index=-100)
+            if labels is not None:
+                labels_host = labels if labels_host is None else nested_concat(labels_host, labels, padding_index=-100)
+            self.control = self.callback_handler.on_prediction_step(self.args, self.state, self.control)
+
+            # Gather all tensors and put them back on the CPU if we have done enough accumulation steps.
+            if self.args.eval_accumulation_steps is not None and (step + 1) % self.args.eval_accumulation_steps == 0:
+                eval_losses_gatherer.add_arrays(self._gather_and_numpify(losses_host, "eval_losses"))
+                if not prediction_loss_only:
+                    preds_gatherer.add_arrays(self._gather_and_numpify(preds_host, "eval_preds"))
+                    labels_gatherer.add_arrays(self._gather_and_numpify(labels_host, "eval_label_ids"))
+
+                # Set back to None to begin a new accumulation
+                losses_host, preds_host, labels_host = None, None, None
+
+        if self.args.past_index and hasattr(self, "_past"):
+            # Clean the state at the end of the evaluation loop
+            delattr(self, "_past")
+
+        # Gather all remaining tensors and put them back on the CPU
+        eval_losses_gatherer.add_arrays(self._gather_and_numpify(losses_host, "eval_losses"))
+        if not prediction_loss_only:
+            preds_gatherer.add_arrays(self._gather_and_numpify(preds_host, "eval_preds"))
+            labels_gatherer.add_arrays(self._gather_and_numpify(labels_host, "eval_label_ids"))
+
+        eval_loss = eval_losses_gatherer.finalize()
+        preds = preds_gatherer.finalize() if not prediction_loss_only else None
+        label_ids = labels_gatherer.finalize() if not prediction_loss_only else None
+
+        if self.compute_metrics is not None and preds is not None and label_ids is not None:
+            metrics = self.compute_metrics(EvalPrediction(predictions=preds, label_ids=label_ids))
+        else:
+            metrics = {}
+
+        if eval_loss is not None:
+            metrics[f"{metric_key_prefix}_loss"] = eval_loss.mean().item()
+
+        # Prefix all keys with metric_key_prefix + '_'
+        for key in list(metrics.keys()):
+            if not key.startswith(f"{metric_key_prefix}_"):
+                metrics[f"{metric_key_prefix}_{key}"] = metrics.pop(key)
+
+        return PredictionOutput(predictions=preds, label_ids=label_ids, metrics=metrics)
+
 
 
 

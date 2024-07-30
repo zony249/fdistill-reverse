@@ -121,6 +121,7 @@ class DataTrainingArguments:
     )
     test_file: Optional[str] = field(default=None, metadata={"help": "A csv or a json file containing the test data."})
 
+
     def __post_init__(self):
         if self.task_name is not None:
             self.task_name = self.task_name.lower()
@@ -135,6 +136,7 @@ class DataTrainingArguments:
             assert (
                 validation_extension == train_extension
             ), "`validation_file` should have the same extension (csv or json) as `train_file`."
+    
 
 
 @dataclass
@@ -174,6 +176,8 @@ class ModelArguments:
 
 @dataclass
 class DistillationArguments(TrainingArguments): 
+
+    eval_batch_size: Optional[int] = field(default=16)
 
     num_student_layers: Optional[int] = field(
         default=6, 
@@ -422,6 +426,9 @@ def main():
 
     if data_args.task_name is None:
         training_args.metric_for_best_model = "combined_score"
+        training_args.greater_is_better = True
+    elif data_args.task_name == "cola":
+        training_args.metric_for_best_model = "matthews_correlation"
         training_args.greater_is_better = True
     elif is_regression:
         training_args.metric_for_best_model = "mse"
