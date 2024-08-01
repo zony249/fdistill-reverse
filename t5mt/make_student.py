@@ -27,14 +27,23 @@ def copy_layers(src_layers: nn.ModuleList, dest_layers: nn.ModuleList, layers_to
 LAYERS_TO_COPY = {
     # maps  num layers in teacher -> num_layers in student -> which teacher layers to copy.
     # 12: bart, 16: pegasus, 6: marian/Helsinki-NLP
+    # 12: {
+    #     1: [11], 
+    #     2: [5, 11],
+    #     3: [3, 7, 11], 
+    #     4: [2, 5, 8, 11], 
+    #     6: [1, 3, 5, 7, 9, 11], 
+    #     12: list(range(12)) 
+    # },
     12: {
-        1: [11], 
-        2: [5, 11],
-        3: [3, 7, 11], 
-        4: [2, 5, 8, 11], 
-        6: [1, 3, 5, 7, 9, 11], 
+        1: [0], 
+        2: [0, 11],
+        3: [0, 6, 11], 
+        4: [0, 4, 8, 11], 
+        6: [0, 2, 4, 7, 9, 11],
         12: list(range(12)) 
     },
+
     # 16: {  # maps  num layers in student -> which teacher layers to copy
     #     1: [0],
     #     2: [0, 15],
@@ -51,7 +60,7 @@ LAYERS_TO_COPY = {
 LAYERS_TO_SUPERVISE = {
     # maps  num layers in student -> which teacher layers to copy.
     6: {1: [5], 2: [3, 5], 3: [1, 4, 5], 4: [1, 2, 4, 5]},
-    12: {1: [11], 2: [5, 11], 3: [3, 7, 11], 6: [1, 3, 5, 8, 10, 11]},
+    12: {1: [11], 2: [5, 11], 3: [3, 7, 11], 6: [1, 3, 5, 7, 9, 11]},
     16: {1: [15], 4: [4, 9, 12, 15], 8: [1, 3, 5, 7, 9, 11, 13, 15]},
 }
 
@@ -195,10 +204,15 @@ def create_student_by_copying_alternating_layers(
     )
     student.save_pretrained(save_path)
     # Save information about copying for easier reproducibility
+    e_layers_supervised = LAYERS_TO_SUPERVISE[teacher_e][e]  
+    d_layers_supervised = LAYERS_TO_SUPERVISE[teacher_d][d]  
 
-    
+    if reverse_encoder: 
+        e_layers_supervised = e_layers_supervised[::-1]
+    if reverse_decoder:
+        d_layers_supervised = d_layers_supervised[::-1]
 
-    return student, e_layers_to_copy, d_layers_to_copy
+    return student, e_layers_supervised, d_layers_supervised # e_layers_to_copy, d_layers_to_copy
 
 
 if __name__ == "__main__":
