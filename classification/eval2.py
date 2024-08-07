@@ -382,11 +382,14 @@ def main():
     print("METRICS: ", mets)
 
     
+    _remove_unused_columns(test_dataset)
     tasks = [data_args.task_name]
     test_loaders = [DataLoader(test_dataset, training_args.eval_batch_size, sampler=SequentialSampler(test_dataset), collate_fn=default_data_collator)]
     if data_args.task_name == "mnli": 
         tasks.append("mnli-mm")
-        test_loaders.append(DataLoader(datasets["test_mismatched"], training_args.eval_batch_size, sampler=SequentialSampler(datasets["test_mismatched"]), collate_fn=default_data_collator))
+        mismatched = datasets["test_mismatched"]
+        _remove_unused_columns(mismatched)
+        test_loaders.append(DataLoader(mismatched, training_args.eval_batch_size, sampler=SequentialSampler(mismatched), collate_fn=default_data_collator))
 
     for task, test_loader in zip(tasks, test_loaders):
         output_test_file = os.path.join(training_args.output_dir, f"test_results_{task}.txt")
@@ -398,7 +401,7 @@ def main():
                 if isinstance(v, torch.Tensor):
                     batch[k] = v.to(training_args.device)
             if data_args.task_name in ["mnli"]: 
-                outputs = model(batch["input_ids"], attention_mask = batch["attention_mask"], labels = batch["labels"])
+                outputs = model(batch["input_ids"], attention_mask = batch["attention_mask"])
             else:
                 outputs = model(**batch)
             predictions = outputs.logits[:, 0] if is_regression else torch.argmax(outputs.logits, dim=-1)
