@@ -121,7 +121,6 @@ class DataTrainingArguments:
     )
     test_file: Optional[str] = field(default=None, metadata={"help": "A csv or a json file containing the test data."})
 
-
     def __post_init__(self):
         if self.task_name is not None:
             self.task_name = self.task_name.lower()
@@ -136,7 +135,6 @@ class DataTrainingArguments:
             assert (
                 validation_extension == train_extension
             ), "`validation_file` should have the same extension (csv or json) as `train_file`."
-    
 
 
 @dataclass
@@ -431,8 +429,8 @@ def main():
         training_args.metric_for_best_model = "matthews_correlation"
         training_args.greater_is_better = True
     elif is_regression:
-        training_args.metric_for_best_model = "mse"
-        training_args.greater_is_better = False
+        training_args.metric_for_best_model = "combined_score"
+        training_args.greater_is_better = True
     else:
         training_args.metric_for_best_model = "accuracy"
         training_args.greater_is_better = True

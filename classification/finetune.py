@@ -399,9 +399,12 @@ def main():
     if data_args.task_name is None:
         training_args.metric_for_best_model = "combined_score"
         training_args.greater_is_better = True
+    elif data_args.task_name == "cola":
+        training_args.metric_for_best_model = "matthews_correlation"
+        training_args.greater_is_better = True
     elif is_regression:
-        training_args.metric_for_best_model = "mse"
-        training_args.greater_is_better = False
+        training_args.metric_for_best_model = "combined_score"
+        training_args.greater_is_better = True
     else:
         training_args.metric_for_best_model = "accuracy"
         training_args.greater_is_better = True
