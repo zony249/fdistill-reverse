@@ -2,8 +2,8 @@
 
 #SBATCH --cpus-per-task=4 # number of cores
 #SBATCH --mem=32000 # 100M for the whole job 
-#SBATCH --time=2-23:00 # walltime in d-hh:mm or hh:mm:ss format
-#SBATCH --account=def-lilimou 
+#SBATCH --time=7-00:00 # walltime in d-hh:mm or hh:mm:ss format
+#SBATCH --account=rrg-lilimou 
 #SBATCH --gres=gpu:1 # GPUs per node
 #SBATCH --output=slurm-logs/slurm-%j-ef-df-sorted.out
 
@@ -11,17 +11,17 @@ nvidia-smi
 
 export TEACHER=facebook/bart-large-xsum
 export OUTPUT_NAME=$(date +%m-%d-%y--%T)-ef-df-sorted
-export MODEL_OUTPUT_PATH=runs/$OUTPUT_NAME
+export MODEL_OUTPUT_PATH=$SCRATCH/fdistill-reverse/runs/summa/$OUTPUT_NAME
 
-mkdir runs
+mkdir $SCRATCH/fdistill-reverse/runs/summa
 
 python distillation.py \
   --teacher $TEACHER \
   --num_train_epochs 40\
   --data_dir xsum \
   --tokenizer_name $TEACHER \
-  --student_decoder_layers 3 --student_encoder_layers 3 \
-  --learning_rate=5e-4 \
+  --student_decoder_layers 6 --student_encoder_layers 6 \
+  --learning_rate=5e-5 \
   --freeze_embeds \
   --temperature 2. \
   --do_train \
