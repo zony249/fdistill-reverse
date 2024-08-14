@@ -931,7 +931,7 @@ class Trainer:
                 if steps_trained_in_current_epoch > 0:
                     steps_trained_in_current_epoch -= 1
                     continue
-
+                
 
                 if (step + 1) % self.args.gradient_accumulation_steps == 0:
                     self.control = self.callback_handler.on_step_begin(self.args, self.state, self.control)
@@ -1644,6 +1644,7 @@ class Trainer:
 
         self.callback_handler.eval_dataloader = dataloader
 
+
         for step, inputs in enumerate(dataloader):
             # print(inputs["input_ids"].shape)
             loss, logits, labels = self.prediction_step(model, inputs, prediction_loss_only, ignore_keys=ignore_keys)
@@ -2021,10 +2022,19 @@ class DistillBertTrainer(Trainer):
         else:
             labels = None
         # outputs.logits, outputs.hidden_states, and outputs.loss are the important outputs
-        student_outputs = model(input_ids=inputs["input_ids"], attention_mask=inputs["attention_mask"], labels=inputs["labels"],  output_hidden_states=True)
+        student_outputs = model(input_ids=inputs["input_ids"], 
+                                attention_mask=inputs["attention_mask"], 
+                                labels=inputs["labels"],  
+                                token_type_ids=inputs["token_type_ids"], 
+                                output_hidden_states=True)
 
         with torch.no_grad():
-            teacher_outputs = self.teacher(input_ids=inputs["input_ids"], attention_mask=inputs["attention_mask"], output_hidden_states=True)
+            teacher_outputs = self.teacher(
+                input_ids=inputs["input_ids"], 
+                attention_mask=inputs["attention_mask"], 
+                labels=inputs["labels"], 
+                token_type_ids=inputs["token_type_ids"], 
+                output_hidden_states=True)
 
 
         if self.compute_hidden_loss: 
