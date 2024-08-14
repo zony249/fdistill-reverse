@@ -366,7 +366,7 @@ def main():
             for k, v in batch.items():
                 if isinstance(v, torch.Tensor):
                     batch[k] = v.to(training_args.device)
-            if data_args.task_name in ["mnli"]: 
+            if data_args.task_name in []: 
                 outputs = model(batch["input_ids"], attention_mask = batch["attention_mask"], labels = batch["labels"])
             else:
                 outputs = model(**batch)
@@ -400,7 +400,8 @@ def main():
             for k, v in batch.items():
                 if isinstance(v, torch.Tensor):
                     batch[k] = v.to(training_args.device)
-            if data_args.task_name in ["mnli"]: 
+            batch["labels"] = None
+            if data_args.task_name in []: 
                 outputs = model(batch["input_ids"], attention_mask = batch["attention_mask"])
             else:
                 outputs = model(**batch)
