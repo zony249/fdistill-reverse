@@ -5,13 +5,13 @@
 #SBATCH --time=0-12:00 # walltime in d-hh:mm or hh:mm:ss format
 #SBATCH --account=rrg-lilimou 
 #SBATCH --gres=gpu:1 # GPUs per node
-#SBATCH --output=slurm-logs/slurm-%j-finetune-teacher-mrpc.out
+#SBATCH --output=slurm-logs/slurm-%j-finetune-teacher-mrpc-DUMMY.out
 
 nvidia-smi
 
 sleep $((RANDOM % 100))
 export TASK_NAME=mrpc
-export EXP_NAME=$(date +%m-%d-%y--%T)--$TASK_NAME-teacher
+export EXP_NAME=$(date +%m-%d-%y--%T)--$TASK_NAME-teacher-DUMMY
 export OUTPUT=$SCRATCH/fdistill-reverse/runs/glue/$EXP_NAME
 
 mkdir $SCRATCH/fdistill-reverse/runs/glue

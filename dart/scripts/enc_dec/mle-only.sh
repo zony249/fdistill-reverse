@@ -10,7 +10,7 @@
 nvidia-smi
 
 export TEACHER=models/dart-teacher-regularized/best_tfmr
-export EXP_NAME=$(date +%m-%d-%y--%T)--ef-df
+export EXP_NAME=$(date +%m-%d-%y--%T)--mle-only
 export OUTPUT=runs/$EXP_NAME
 
 
@@ -18,7 +18,7 @@ python3 distillation.py \
   --teacher $TEACHER \
   --data_dir dart \
   --tokenizer_name $TEACHER \
-  --student_decoder_layers 3 --student_encoder_layers 3 \
+  --student_decoder_layers 6 --student_encoder_layers 6 \
   --learning_rate=1e-4 \
   --freeze_embeds \
   --do_train \

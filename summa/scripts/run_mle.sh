@@ -1,6 +1,5 @@
 #!/bin/sh
 
-
 #SBATCH --cpus-per-task=4 # number of cores
 #SBATCH --mem=32000 # 100M for the whole job 
 #SBATCH --time=7-00:00 # walltime in d-hh:mm or hh:mm:ss format
@@ -10,16 +9,20 @@
 
 nvidia-smi
 
-export EXP_NAME=$(date +%m-%d-%y--%T)--xsum-student-mle
-export MODEL_SAVE_DIR=runs/$EXP_NAME
+export TEACHER=facebook/bart-large-xsum
+export OUTPUT_NAME=$(date +%m-%d-%y--%T)--xsum-student-mle
+export MODEL_OUTPUT_PATH=$SCRATCH/fdistill-reverse/runs/summa/$OUTPUT_NAME
+
+mkdir $SCRATCH/fdistill-reverse/runs/summa
 
 python distillation.py \
-  --teacher facebook/bart-large-xsum \
+  --teacher $TEACHER \
+  --num_train_epochs 40\
   --data_dir xsum \
-  --tokenizer_name facebook/bart-large-xsum \
-  --student_decoder_layers 3 --student_encoder_layers 3 \
+  --tokenizer_name $TEACHER \
+  --student_decoder_layers 6 --student_encoder_layers 6 \
+  --learning_rate=5e-5 \
   --freeze_embeds \
-  --learning_rate=3e-4 \
   --temperature 2.\
   --do_train \
   --gpus 1\
@@ -29,8 +32,7 @@ python distillation.py \
   --alpha_hid=0. --alpha_ce=0. --alpha_mlm=1.\
   --train_batch_size=16 --eval_batch_size=16 --gradient_accumulation_steps=1 \
   --sortish_sampler \
-  --num_train_epochs=40 \
   --warmup_steps 500 \
-  --output_dir $MODEL_SAVE_DIR \
+  --output_dir $MODEL_OUTPUT_PATH \
   --overwrite_output_dir \
   "$@"
