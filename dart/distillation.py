@@ -20,7 +20,6 @@ from transformers.models.bart.modeling_bart import shift_tokens_right
 from utils import calculate_bleu, check_output_dir, freeze_params, label_smoothed_nll_loss, use_task_specific_params
 
 
-
 # need the parent dir module
 sys.path.insert(2, str(Path(__file__).resolve().parents[1]))
 from lightning_base import generic_train  # noqa
@@ -220,13 +219,6 @@ class SummarizationDistiller(SummarizationModule):
                 self.d_matches,
                 normalize_hidden=self.hparams.normalize_hidden,
             )
-
-        if torch.isnan(hid_loss_enc): 
-            print("isnan!")
-        else: 
-            print("")
-
-
 
         blended_loss = (
             self.alpha_ce * loss_ce
