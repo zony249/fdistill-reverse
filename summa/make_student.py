@@ -27,22 +27,22 @@ def copy_layers(src_layers: nn.ModuleList, dest_layers: nn.ModuleList, layers_to
 LAYERS_TO_COPY = {
     # maps  num layers in teacher -> num_layers in student -> which teacher layers to copy.
     # 12: bart, 16: pegasus, 6: marian/Helsinki-NLP
-    # 12: {
-    #     1: [11], 
-    #     2: [5, 11],
-    #     3: [3, 7, 11], 
-    #     4: [2, 5, 8, 11], 
-    #     6: [1, 3, 5, 7, 9, 11], 
-    #     12: list(range(12)) 
-    # },
     12: {
-        1: [0], 
-        2: [0, 11],
-        3: [0, 6, 11], 
-        4: [0, 4, 8, 11], 
-        6: [0, 1, 3, 9, 10, 11],
+        1: [11], 
+        2: [5, 11],
+        3: [3, 7, 11], 
+        4: [2, 5, 8, 11], 
+        6: [1, 3, 5, 7, 9, 11], 
         12: list(range(12)) 
     },
+    # 12: {
+    #     1: [0], 
+    #     2: [0, 11],
+    #     3: [0, 6, 11], 
+    #     4: [0, 4, 8, 11], 
+    #     6: [0, 1, 3, 9, 10, 11],
+    #     12: list(range(12)) 
+    # },
     # 16: {  # maps  num layers in student -> which teacher layers to copy
     #     1: [0],
     #     2: [0, 15],
