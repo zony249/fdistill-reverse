@@ -100,9 +100,41 @@ class TransformDistance(Measure):
         """
         self.val = (hidden_1 - hidden_2).norm(dim=-1).mean(dim=(0, 2))
         return self
+class MeanPairwiseLayerTransformDist(Measure): 
+    def __init__(self):
+        super().__init__() 
+    def compute(self, hidden_1, hidden_2): 
+        """
+        hidden_1: torch.Tensor[batch, layers_1, seq_len, hidden]
+        hidden_1: torch.Tensor[batch, layers_2, seq_len, hidden]
+        produces: torch.Tensor[layers_1, layers_2]
+        """
+        layers_1 = hidden_1.shape[1]
+        layers_2 = hidden_2.shape[1]
+        seq_len = min(hidden_1.shape[2], hidden_2.shape[2]) 
+        dim = hidden_1.shape[-1]
 
+        per_layer_raw_diff = hidden_1[:, :, None, :seq_len, :] - hidden_2[:, None, :, :seq_len, :] #[batch, layer, layer, seq_len, hidden]
+        seq_batch_concat = torch.movedim(per_layer_raw_diff, 3, 1).reshape((-1, layers_1, layers_2, dim))
+        norms = seq_batch_concat.norm(dim=-1) #[batch x seq_len, layer, layer]
+        means = norms.mean(dim=0)
+        self.val = means 
+        return self
 
-
+class MeanLayerDistance(Measure): 
+    def __init__(self): 
+        super().__init__()
+    def compute(self, pairwise_layer_dist): 
+        """
+        pairwise_layer_dist: torch.Tensor[layers, layers]
+        """
+        # if square 
+        if pairwise_layer_dist.shape[0] == pairwise_layer_dist.shape[-1]: 
+            lower_tril = torch.tril(pairwise_layer_dist, diagonal=-1)
+            self.val = lower_tril.sum() / torch.arange(1, pairwise_layer_dist.shape[0]).sum()
+        else: 
+            self.val = pairwise_layer_dist.mean()
+        return self
 
 
 def compute_pca(states:List[torch.Tensor]) -> torch.Tensor: 
@@ -179,6 +211,9 @@ def tensorize_decoder_generate_outputs(raw_decoder_outputs, num_beams):
 
 
 def tensorize_encoder_outputs(raw_encoder_outputs):
+    """
+    returns: seq: torch.Tensor[batch_size, layers, seq_len, hidden]
+    """
     return torch.stack(raw_encoder_outputs, dim=1)
 def tensorize_decoder_outputs(raw_decoder_outputs): 
     return tensorize_encoder_outputs(raw_decoder_outputs)

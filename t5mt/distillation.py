@@ -237,7 +237,7 @@ class SummarizationDistiller(TranslationModule):
         assert not isinstance(hidden_states_T, torch.Tensor), f"{msg}{hidden_states_T.shape}"
 
         # add embedding layer
-        matches = [i + 1 for i in matches]
+        matches = [0] + [i + 1 for i in matches]
 
         mask = attention_mask.to(hidden_states[0])
         valid_count = mask.sum() * hidden_states[0].size(-1)

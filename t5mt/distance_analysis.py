@@ -33,12 +33,20 @@ logger = getLogger(__name__)
 DEFAULT_DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
 LAYER_MAP = {
-    1: [11], 
-    2: [5, 11],
-    3: [3, 7, 11], 
-    4: [2, 5, 8, 11], 
-    6: [1, 3, 5, 7, 9, 11], 
-    12: list(range(12)) 
+    6: {
+        1: [5], 
+        2: [2, 5], 
+        3: [1, 3, 5], 
+        6: list(range(6))
+    }, 
+    12: {
+        1: [11], 
+        2: [5, 11],
+        3: [3, 7, 11], 
+        4: [2, 5, 8, 11], 
+        6: [1, 3, 5, 7, 9, 11], 
+        12: list(range(12)) 
+    }
 }
 
 
@@ -66,8 +74,8 @@ class MetricsSuite:
         hidden_2: torch.Tensor[batch, num_layers_2, hidden]
         
         """
-        dec_indices = [0] + [i+1 for i in LAYER_MAP[self.config2.num_decoder_layers]] if self.config2 is not None else None
-        enc_indices = [0] + [i+1 for i in LAYER_MAP[self.config2.num_layers]] if self.config2 is not None else None
+        dec_indices = [0] + [i+1 for i in LAYER_MAP[self.config1.num_decoder_layers][self.config2.num_decoder_layers]] if self.config2 is not None else None
+        enc_indices = [0] + [i+1 for i in LAYER_MAP[self.config1.num_layers][self.config2.num_layers]] if self.config2 is not None else None
 
         if self.reverse_enc: 
             enc_indices = enc_indices[::-1]
@@ -130,8 +138,8 @@ class MetricsSuite:
         if self.config2 is not None: 
             student_between_enc_dist = self.dist_between_student_enc.get_mean()
             student_between_dec_dist = self.dist_between_student_dec.get_mean()
-            ax[0].bar(torch.tensor([i+1 for i in LAYER_MAP[self.config2.num_layers]]) + shift, student_between_enc_dist, width, label= "Student") 
-            ax[1].bar(torch.tensor([i+1 for i in LAYER_MAP[self.config2.num_decoder_layers]]) + shift, student_between_dec_dist, width, label= "Student") 
+            ax[0].bar(torch.tensor([i+1 for i in LAYER_MAP[self.config1.num_layers][self.config2.num_layers]]) + shift, student_between_enc_dist, width, label= "Student") 
+            ax[1].bar(torch.tensor([i+1 for i in LAYER_MAP[self.config1.num_decoder_layers][self.config2.num_decoder_layers]]) + shift, student_between_dec_dist, width, label= "Student") 
             plt.savefig(os.path.join(dirname, "between-layer-distances"))
             plt.close()
             
@@ -157,7 +165,6 @@ class MetricsSuite:
             ax[1].set_xticklabels(self.dec_indices)
 
             
-            LAYER_MAP[self.config2.num_layers]
             plt.savefig(os.path.join(dirname, "teacher-student-matching-dist"))
             plt.close() 
 
@@ -197,6 +204,26 @@ class MetricsSuite:
 
             plt.savefig(os.path.join(dirname, "student-student-pairwise-dist"))
             plt.close()
+
+            # compute the average distance between each student layer and all teacher layers
+            student_teacher_avg_dist_per_layer_enc = teacher_student_enc.mean(dim=0) # torch.Tensor[num_student_layers]
+            student_teacher_avg_dist_enc = student_teacher_avg_dist_per_layer_enc.mean()
+            student_teacher_avg_dist_per_layer_dec = teacher_student_dec.mean(dim=0) # torch.Tensor[num_student_layers]
+            student_teacher_avg_dist_dec = student_teacher_avg_dist_per_layer_dec.mean()
+            teacher_avg_enc_dist = teacher_between_enc_dist.mean()
+            teacher_avg_dec_dist = teacher_between_dec_dist.mean()
+            with open(os.path.join(dirname, "teacher-student-stats.tsv"), "w") as f:
+                f.write(f"student_teacher_dist_per_layer_enc\t{student_teacher_avg_dist_per_layer_enc.tolist()}\n")
+                f.write(f"student_teacher_avg_dist_enc\t{student_teacher_avg_dist_enc.item()}\n")
+                f.write(f"student_teacher_dist_per_layer_dec\t{student_teacher_avg_dist_per_layer_dec.tolist()}\n")
+                f.write(f"student_teacher_avg_dist_dec\t{student_teacher_avg_dist_dec.item()}\n")
+                f.write(f"teacher_between_enc_dist\t{teacher_between_enc_dist.tolist()}\n")
+                f.write(f"teacher_avg_between_enc_dist\t{teacher_avg_enc_dist.item()}\n")
+                f.write(f"teacher_between_dec_dist\t{teacher_between_dec_dist.tolist()}\n")
+                f.write(f"teacher_avg_between_dec_dist\t{teacher_avg_dec_dist.item()}\n")
+                f.write(f"||teacher - student|| / ||teacher_encoder_between_layer||\t{(student_teacher_avg_dist_enc / teacher_avg_enc_dist).item()}\n")
+
+
 
         else: 
             plt.savefig(os.path.join(dirname, "between-layer-distances"))
