@@ -104,9 +104,16 @@ class SummarizationDistiller(TranslationModule):
         else:
             self.e_matches = None
             self.d_matches = None
+        
+        self.student_layer_to_match = hparams.match_layers 
+        self.to_teacher_layer = hparams.to
 
-        print("Encoder Layers Supervised:", self.e_matches)
-        print("Decoder Layers Supervised:", self.d_matches)
+        if self.student_layer_to_match is not None and self.to_teacher_layer is not None: 
+            print("Encoder Layer Supervised:", self.student_layer_to_match, "match to", self.to_teacher_layer)
+            print("Decoder Layer Supervised:", self.student_layer_to_match, "match to", self.to_teacher_layer)
+        else: 
+            print("Encoder Layers Supervised:", self.e_matches)
+            print("Decoder Layers Supervised:", self.d_matches)
 
         print("========== STUDENT ARCHITECTURE ===========")
         print(student)
@@ -229,31 +236,44 @@ class SummarizationDistiller(TranslationModule):
         )
         return blended_loss, loss_ce, student_lm_loss, hid_loss_enc, hid_loss_dec
 
-    @staticmethod
-    def calc_hidden_loss(attention_mask, hidden_states, hidden_states_T, matches, normalize_hidden, only_the_last=False):
+    # @staticmethod
+    def calc_hidden_loss(self, attention_mask, hidden_states, hidden_states_T, matches, normalize_hidden, only_the_last=False):
         """MSE(student_hid, teacher_hid[matches]). Called "Intermediate supervision" in paper. Inspired by TinyBERT."""
         msg = "expected list or tuple for hidden_states, got tensor of shape: "
         assert not isinstance(hidden_states, torch.Tensor), f"{msg}{hidden_states.shape}"
         assert not isinstance(hidden_states_T, torch.Tensor), f"{msg}{hidden_states_T.shape}"
 
-        # add embedding layer
-        matches = [0] + [i + 1 for i in matches]
+        if self.student_layer_to_match is not None and self.to_teacher_layer is not None:
+            student_state = hidden_states[self.student_layer_to_match] 
+            teacher_state = hidden_states_T[self.to_teacher_layer]
+            if normalize_hidden:
+                student_state = F.layer_norm(student_state, student_state.shape[:])
+                teacher_state = F.layer_norm(teacher_state, teacher_state.shape[:])
+            mask = attention_mask.to(hidden_states[0]) # [batch, seq_len]
+            valid_count = mask.sum() * hidden_states[0].size(-1)
+            mse = F.mse_loss(student_state, teacher_state, reduction="none") # [batch, seq_len, hidden]
+            masked_mse = (mse * mask[:, :, None]).sum() / valid_count 
+            return masked_mse
 
-        mask = attention_mask.to(hidden_states[0])
-        valid_count = mask.sum() * hidden_states[0].size(-1)
-        if only_the_last:
-            student_states = torch.stack([hidden_states[-1]])
-            teacher_states = torch.stack([hidden_states_T[-1]])
         else:
-            student_states = torch.stack([hidden_states[i] for i in range(len(matches))])
-            teacher_states = torch.stack([hidden_states_T[j] for j in matches])
-        assert student_states.shape == teacher_states.shape, f"{student_states.shape} != {teacher_states.shape}"
-        if normalize_hidden:
-            student_states = F.layer_norm(student_states, student_states.shape[1:])
-            teacher_states = F.layer_norm(teacher_states, teacher_states.shape[1:])
-        mse = F.mse_loss(student_states, teacher_states, reduction="none")
-        masked_mse = (mse * mask.unsqueeze(0).unsqueeze(-1)).sum() / valid_count
-        return masked_mse
+            # add embedding layer
+            matches = [0] + [i + 1 for i in matches]
+
+            mask = attention_mask.to(hidden_states[0])
+            valid_count = mask.sum() * hidden_states[0].size(-1)
+            if only_the_last:
+                student_states = torch.stack([hidden_states[-1]])
+                teacher_states = torch.stack([hidden_states_T[-1]])
+            else:
+                student_states = torch.stack([hidden_states[i] for i in range(len(matches))])
+                teacher_states = torch.stack([hidden_states_T[j] for j in matches])
+            assert student_states.shape == teacher_states.shape, f"{student_states.shape} != {teacher_states.shape}"
+            if normalize_hidden:
+                student_states = F.layer_norm(student_states, student_states.shape[1:])
+                teacher_states = F.layer_norm(teacher_states, teacher_states.shape[1:])
+            mse = F.mse_loss(student_states, teacher_states, reduction="none")
+            masked_mse = (mse * mask.unsqueeze(0).unsqueeze(-1)).sum() / valid_count
+            return masked_mse
 
 
 def add_distill_args(parser):
@@ -277,6 +297,8 @@ def add_distill_args(parser):
     parser.add_argument("--reverse_encoder", action="store_true", default=False)
     parser.add_argument("--reverse_decoder", action="store_true", default=False)
     parser.add_argument("--copy_same_order", action="store_true", default=False, help="whether to copy the layers in same order as matching, or maintain consecutive order copying")
+    parser.add_argument("--match_layers", type=int, default=None, help="student layer to match")
+    parser.add_argument("--to", type=int, default=None, help="match student layer from argument '--match_layers' to teacher layer specified")
 
 
 class TranslationDistiller(SummarizationDistiller):
@@ -330,7 +352,11 @@ if __name__ == "__main__":
     parser = pl.Trainer.add_argparse_args(parser)
     parser = TranslationDistiller.add_model_specific_args(parser, os.getcwd())
     args = parser.parse_args()
-
+    
+    if args.match_layers is None and args.to is not None:
+        raise ValueError("if match_layers is none, then to should also be none")
+    if args.match_layers is not None and args.to is None: 
+        raise ValueError("if match layers is defined, to should also be defined")
 
 
 
