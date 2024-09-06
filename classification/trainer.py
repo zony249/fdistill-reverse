@@ -1863,6 +1863,7 @@ class DistillBertTrainer(Trainer):
         self.compute_kl_loss: bool = self.alpha_kl > 0
         self.compute_mle_loss: bool = self.alpha_mle > 0
 
+        self.layer_matching = None
         if self.compute_hidden_loss:
             self.layer_matching = LAYER_MAP[self.num_student_layers] 
         
