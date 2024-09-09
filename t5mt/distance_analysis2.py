@@ -169,6 +169,30 @@ class MetricsSuite:
             plt.savefig(os.path.join(dirname, "between-model-pairwise-dist"))
             plt.close()
 
+        with open(os.path.join(dirname, "between-model-pairwise-encoder.csv"), "w") as f:
+            # indices
+            f.write(f"layer_index,")
+            for i in range(between_enc_pairwise.shape[1]):
+                f.write(f"{i}{',' if i != between_enc_pairwise.shape[1]-1 else ''}")
+            f.write("\n")
+            for i in range(between_enc_pairwise.shape[0]): 
+                f.write(f"{i},")
+                for j in range(between_enc_pairwise.shape[1]): 
+                    f.write(f"{between_enc_pairwise[i, j].item()}{',' if j != between_enc_pairwise.shape[1]-1 else ''}")
+                f.write("\n")
+                
+        with open(os.path.join(dirname, "between-model-pairwise-decoder.csv"), "w") as f:
+            # indices
+            f.write(f"layer_index,")
+            for i in range(between_dec_pairwise.shape[1]):
+                f.write(f"{i}{',' if i != between_dec_pairwise.shape[1]-1 else ''}")
+            f.write("\n")
+            for i in range(between_dec_pairwise.shape[0]): 
+                f.write(f"{i},")
+                for j in range(between_dec_pairwise.shape[1]): 
+                    f.write(f"{between_dec_pairwise[i, j].item()}{',' if j != between_dec_pairwise.shape[1]-1 else ''}")
+                f.write("\n")
+                
 
         with open(os.path.join(dirname, "stats.csv"), "w") as f: 
             f.write(f"teacher_encoder_mean_dist,{self.teacher_encoder_mean_dist.get_val()}\n")
