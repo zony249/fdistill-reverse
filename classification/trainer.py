@@ -152,6 +152,14 @@ def _model_unwrap(model: nn.Module) -> nn.Module:
     else:
         return model
 
+class HiddenLayerDistilCallback(ProgressCallback): 
+
+    def on_step_end(self, args, state, control, **kwargs):
+        if state.is_local_process_zero:
+            self.training_bar.set_postfix(ordered_dict=state.losses, refresh=True)
+            self.training_bar.update(state.global_step - self.current_step)
+            self.current_step = state.global_step
+            # print("HELLO")
 
 class Trainer:
     """
@@ -291,7 +299,7 @@ class Trainer:
         self.callback_handler = CallbackHandler(
             callbacks, self.model, self.tokenizer, self.optimizer, self.lr_scheduler
         )
-        self.add_callback(PrinterCallback if self.args.disable_tqdm else DEFAULT_PROGRESS_CALLBACK)
+        self.add_callback(HiddenLayerDistilCallback )#if self.args.disable_tqdm else DEFAULT_PROGRESS_CALLBACK)
 
         # Will be set to True by `self._setup_loggers()` on first call to `self.log()`.
         self._loggers_initialized = False
@@ -366,6 +374,7 @@ class Trainer:
             self.label_smoother = None
 
         self.state = TrainerState()
+        self.state.losses = {}
         self.control = TrainerControl()
         # Internal variable for total_flos used to count as tensors (for distributed + TPU), will be sent in the
         # state at each call to self.log.
@@ -1360,6 +1369,7 @@ class Trainer:
             # We don't use .loss here since the model may return tuples instead of ModelOutput.
             loss = outputs["loss"] if isinstance(outputs, dict) else outputs[0]
 
+        self.state.losses = [("loss", loss.item())]
         return (loss, outputs) if return_outputs else loss
 
     def is_local_process_zero(self) -> bool:
@@ -1841,6 +1851,7 @@ LAYER_MAP = {
 }
 
 
+
 class DistillBertTrainer(Trainer): 
     def __init__(self, 
                   teacher:PreTrainedModel,
@@ -1871,13 +1882,18 @@ class DistillBertTrainer(Trainer):
             self.layer_matching = self.layer_matching[::-1]
 
 
-
-
         print("======= STUDENT ARCHITECTURE ========")
         print(self.model)
         print("======= MATCHING STRATEGY =======")
-        print(f"reverse: {self.reverse}")
-        print(f"layer_matching: {self.layer_matching}")
+        if self.args.match_layer is not None and self.args.to is not None: 
+            self.match_one_layer = self.args.match_layer 
+            self.match_to = self.args.to
+            print(f"layer_matching: {self.match_one_layer} of student to {self.match_to} of teacher")
+        else: 
+            self.match_one_layer = None
+            self.match_to = None
+            print(f"reverse: {self.reverse}")
+            print(f"layer_matching: {self.layer_matching}")
         print(f"metric_for_best_model: {self.args.metric_for_best_model}")
 
 
@@ -1919,7 +1935,7 @@ class DistillBertTrainer(Trainer):
         return t_hidden, s_hidden
 
 
-    def _hidden_loss(self, 
+    def _cosine_loss(self, 
                     teacher_states: List[torch.Tensor], 
                     student_states: List[torch.Tensor], 
                     attention_mask: torch.Tensor) -> torch.Tensor:  
@@ -1940,6 +1956,31 @@ class DistillBertTrainer(Trainer):
         normed_losses = [(l * attention_mask).sum()/valids for l in losses]
 
         # reduce along the layer
+        reduction = 0 
+        for nl in normed_losses:
+            reduction += nl
+        reduction /= len(normed_losses)
+        
+        return reduction 
+
+    def _hidden_loss(self, 
+                    teacher_states: List[torch.Tensor], 
+                    student_states: List[torch.Tensor], 
+                    attention_mask: torch.Tensor) -> torch.Tensor:  
+        """
+        mse loss
+        
+        teacher_states: Tuple(Tensor[batch_size, sequence_len, common_hidden_dim]) 
+        student_states: Tuple(Tensor[batch_size, sequence_len, common_hidden_dim]) 
+        attention_mask: Tensor[batch_size, sequence_len]
+        """
+        assert len(teacher_states) == len(student_states), "Number of teacher and student states do not match" 
+
+        diffs = [((t - s) * (t - s)).sum(dim=-1) for t, s in zip(teacher_states, student_states)]
+        valids = attention_mask.sum()
+        # normalized by the number of valids
+        normed_losses = [(l * attention_mask).mean(dim=0).sum()/valids for l in diffs]
+
         reduction = 0 
         for nl in normed_losses:
             reduction += nl
@@ -2042,11 +2083,15 @@ class DistillBertTrainer(Trainer):
 
         if self.compute_hidden_loss: 
         
-            teacher_hidden, student_hidden = self.get_matching_states(
-                    teacher_hidden=teacher_outputs.hidden_states, 
-                    student_hidden=student_outputs.hidden_states,
-                    layers_matched=self.layer_matching, 
-                    match_embeddings=True)
+            if self.match_one_layer is not None and self.match_to is not None: 
+                student_hidden = [student_outputs.hidden_states[self.match_one_layer]]
+                teacher_hidden = [teacher_outputs.hidden_states[self.match_to]]
+            else:
+                teacher_hidden, student_hidden = self.get_matching_states(
+                        teacher_hidden=teacher_outputs.hidden_states, 
+                        student_hidden=student_outputs.hidden_states,
+                        layers_matched=self.layer_matching, 
+                        match_embeddings=True)
             
             hidden_loss = self._hidden_loss(teacher_states=teacher_hidden, 
                               student_states=student_hidden, 
@@ -2072,6 +2117,11 @@ class DistillBertTrainer(Trainer):
         # else:
         #     # We don't use .loss here since the model may return tuples instead of ModelOutput.
         #     loss = outputs["loss"] if isinstance(outputs, dict) else outputs[0]
+
+        self.state.losses = [("loss", loss.item()),\
+                             ("mle_loss", mle_loss.item() if isinstance(mle_loss, torch.Tensor) else mle_loss), \
+                             ("kl_loss", kl_loss.item() if isinstance(kl_loss, torch.Tensor) else kl_loss), \
+                             ("hidden_loss", hidden_loss.item() if isinstance(hidden_loss, torch.Tensor) else hidden_loss)]
 
         return (loss, student_outputs[:2]) if return_outputs else loss
 

@@ -22,8 +22,13 @@ import sys
 from dataclasses import dataclass, field
 from typing import Optional
 from argparse import ArgumentParser, Namespace
+from tqdm import tqdm
+import inspect
 
 import numpy as np
+import matplotlib.pyplot as plt
+import torch 
+from torch.utils.data import Dataset, DataLoader, SequentialSampler
 from datasets import load_dataset, load_metric
 
 import transformers
@@ -40,7 +45,9 @@ from transformers import (
     set_seed,
 )
 from transformers.trainer_utils import get_last_checkpoint, is_main_process
+from transformers.data.data_collator import DataCollator, DataCollatorWithPadding, default_data_collator
 from glue_metrics import Glue
+from dist_utils import MeanLayerDistance, MeanPairwiseLayerTransformDist 
 
 
 task_to_keys = {
@@ -55,7 +62,7 @@ task_to_keys = {
     "wnli": ("sentence1", "sentence2"),
 }
 
-from trainer import DistillBertTrainer
+from trainer import Trainer
 
 
 logger = logging.getLogger(__name__)
@@ -80,6 +87,92 @@ class Writer(object):
         self.file.close()
 
 
+class MetricSuite: 
+    def __init__(self, savedir, config1, config2=None):
+        self.savedir = savedir 
+        self.config1 = config1
+        self.teacher_pairwise_dist = MeanPairwiseLayerTransformDist() 
+        self.teacher_mean_dist = MeanLayerDistance() 
+
+        self.config2 = config2 
+        if self.config2 is not None: 
+            self.teacher_student_pairwise_dist = MeanPairwiseLayerTransformDist() 
+            self.teacher_student_mean_dist = MeanLayerDistance()
+            self.student_pairwise_dist = MeanPairwiseLayerTransformDist() 
+            self.student_mean_dist = MeanLayerDistance()
+
+    def compute_accum(self, hidden_t, hidden_s=None): 
+        """
+        hidden_t = Tuple[torch.Tensor[batch, seq_len, hidden]]
+        """
+        if hidden_s is None and not self.config2 is None: 
+            raise ValueError("student model exists, yet hidden_s is none!")
+        hidden_t_stacked = torch.stack(hidden_t, dim=1) #[batch, layers, seq_len, hidden] 
+        hidden_s_stacked = torch.stack(hidden_s, dim=1) if hidden_s is not None else None
+        self.teacher_pairwise_dist(hidden_t_stacked, hidden_t_stacked).accum()
+        self.teacher_mean_dist(self.teacher_pairwise_dist.get_val()).accum() 
+        if self.config2 is not None: 
+            self.teacher_student_pairwise_dist(hidden_t_stacked, hidden_s_stacked).accum()
+            self.teacher_student_mean_dist(self.teacher_student_pairwise_dist.get_val()).accum()
+            self.student_pairwise_dist(hidden_s_stacked, hidden_s_stacked).accum()
+            self.student_mean_dist(self.student_pairwise_dist.get_val()).accum()
+
+    def savefigs(self): 
+        teacher_teacher = self.teacher_pairwise_dist.get_mean().detach().cpu()
+        fig, ax = plt.subplots(ncols=1, figsize=(5, 4), gridspec_kw={'wspace': 0.5})
+        im1 = ax.imshow(teacher_teacher)
+        ax.set_title("Encoder")
+        ax.set_xlabel("Teacher Layer j")
+        ax.set_ylabel("Teacher Layer i")
+
+        fig.colorbar(im1, ax=ax)
+
+        plt.savefig(os.path.join(self.savedir, "teacher-pairwise-dist"))
+        plt.close()
+
+        if self.config2 is not None: 
+            teacher_student = self.teacher_student_pairwise_dist.get_mean().detach().cpu()
+            fig, ax = plt.subplots(ncols=1, figsize=(5, 4), gridspec_kw={'wspace': 0.5})
+            im1 = ax.imshow(teacher_student)
+            ax.set_title("Encoder")
+            ax.set_xlabel("Student Layer j")
+            ax.set_ylabel("Teacher Layer i")
+
+            fig.colorbar(im1, ax=ax)
+
+            plt.savefig(os.path.join(self.savedir, "teacher-student-pairwise-dist"))
+            plt.close()
+
+            student_student = self.student_pairwise_dist.get_mean().detach().cpu()
+            fig, ax = plt.subplots(ncols=1, figsize=(5, 4), gridspec_kw={'wspace': 0.5})
+            im1 = ax.imshow(student_student)
+            ax.set_title("Encoder")
+            ax.set_xlabel("Student Layer j")
+            ax.set_ylabel("Student Layer i")
+
+            fig.colorbar(im1, ax=ax)
+
+            plt.savefig(os.path.join(self.savedir, "student-pairwise-dist"))
+            plt.close()
+
+            with open(os.path.join(self.savedir, "between-model-pairwise.csv"), "w") as f:
+                # indices
+                f.write(f"layer_index,")
+                for i in range(teacher_student.shape[1]):
+                    f.write(f"{i}{',' if i != teacher_student.shape[1]-1 else ''}")
+                f.write("\n")
+                for i in range(teacher_student.shape[0]): 
+                    f.write(f"{i},")
+                    for j in range(teacher_student.shape[1]): 
+                        f.write(f"{teacher_student[i, j].item()}{',' if j != teacher_student.shape[1]-1 else ''}")
+                    f.write("\n")
+
+        
+        with open(os.path.join(self.savedir, "stats.csv"), "w") as f: 
+            f.write(f"teacher_mean_dist,{self.teacher_mean_dist.get_val()}\n")
+            if self.config2 is not None: 
+                f.write(f"student_mean_dist,{self.student_mean_dist.get_val()}\n")
+                f.write(f"between_model_mean_dist,{self.teacher_student_mean_dist.get_val()}\n")
 
 
 @dataclass
@@ -146,6 +239,11 @@ class ModelArguments:
     model_name_or_path: str = field(
         metadata={"help": "Path to pretrained model or model identifier from huggingface.co/models"}
     )
+    student_model: Optional[str] = field(
+        default=None, 
+        metadata={"help": "Path to pretrained student model to compare with teacher"}
+    )
+    
     config_name: Optional[str] = field(
         default=None, metadata={"help": "Pretrained config name or path if not the same as model_name"}
     )
@@ -172,37 +270,7 @@ class ModelArguments:
         },
     )
 
-@dataclass
-class DistillationArguments(TrainingArguments): 
 
-    eval_batch_size: Optional[int] = field(default=16)
-
-    num_student_layers: Optional[int] = field(
-        default=6, 
-        metadata={"help": "Number of layers for student model"})
-
-    alpha_kl: Optional[float] = field(
-        default=1., 
-        metadata={"help": "KL divergence balancer"})
-
-    alpha_mle: Optional[float] = field(
-        default=1., 
-        metadata={"help": "MLE objective balancer"})
-
-    alpha_hidden: Optional[float] = field(
-        default=1., 
-        metadata={"help": "Hidden loss balancer"})
-    
-    reverse: Optional[bool] = field(
-        default=False, 
-        metadata={"help": "Reverse layer matching"})
-
-    match_layer: Optional[int] = field(
-        default=None, 
-        metadata={"help": "Student layer to match (one layer)"})
-    to: Optional[int] = field(
-        default=None, 
-        metadata={"help": "teacher layer to match to"})
 
 
 def main():
@@ -210,7 +278,7 @@ def main():
     # or by passing the --help flag to this script.
     # We now keep distinct sets of args, for a cleaner separation of concerns.
 
-    parser = HfArgumentParser((ModelArguments, DataTrainingArguments, DistillationArguments))
+    parser = HfArgumentParser((ModelArguments, DataTrainingArguments, TrainingArguments))
     if len(sys.argv) == 2 and sys.argv[1].endswith(".json"):
         # If we pass only one argument to the script and it's the path to a json file,
         # let's parse it to get our arguments.
@@ -218,50 +286,10 @@ def main():
     else:
         model_args, data_args, training_args = parser.parse_args_into_dataclasses()
 
-    if training_args.match_layer is not None: 
-        assert training_args.to is not None, "if --match_layer is specified, --to must be specified" 
-    if training_args.to is not None: 
-        assert training_args.match_layer is not None, "if --to is specified, --match_layer must be specified" 
-
-    # Detecting last checkpoint.
-    last_checkpoint = None
-    if os.path.isdir(training_args.output_dir) and training_args.do_train and not training_args.overwrite_output_dir:
-        last_checkpoint = get_last_checkpoint(training_args.output_dir)
-        if last_checkpoint is None and len(os.listdir(training_args.output_dir)) > 0:
-            raise ValueError(
-                f"Output directory ({training_args.output_dir}) already exists and is not empty. "
-                "Use --overwrite_output_dir to overcome."
-            )
-        elif last_checkpoint is not None:
-            logger.info(
-                f"Checkpoint detected, resuming training at {last_checkpoint}. To avoid this behavior, change "
-                "the `--output_dir` or add `--overwrite_output_dir` to train from scratch."
-            )
-
     os.makedirs(training_args.output_dir)
     redir = Writer(training_args.output_dir)
     sys.stdout = redir
     sys.stderr = redir
-
-    # Setup logging
-    logging.basicConfig(
-        format="%(asctime)s - %(levelname)s - %(name)s -   %(message)s",
-        datefmt="%m/%d/%Y %H:%M:%S",
-        handlers=[logging.StreamHandler(sys.stdout)],
-    )
-    logger.setLevel(logging.INFO if is_main_process(training_args.local_rank) else logging.WARN)
-
-    # Log on each process the small summary:
-    logger.warning(
-        f"Process rank: {training_args.local_rank}, device: {training_args.device}, n_gpu: {training_args.n_gpu}"
-        + f"distributed training: {bool(training_args.local_rank != -1)}, 16-bits training: {training_args.fp16}"
-    )
-    # Set the verbosity to info of the Transformers logger (on main process only):
-    if is_main_process(training_args.local_rank):
-        transformers.utils.logging.set_verbosity_info()
-        transformers.utils.logging.enable_default_handler()
-        transformers.utils.logging.enable_explicit_format()
-    logger.info(f"Training/evaluation parameters {training_args}")
 
     # Set seed before initializing model.
     set_seed(training_args.seed)
@@ -282,96 +310,37 @@ def main():
         # Downloading and loading a dataset from the hub.
         datasets = load_dataset("nyu-mll/glue", data_args.task_name, cache_dir="glue_dataset")
     else:
-        # Loading a dataset from your local files.
-        # CSV/JSON training and evaluation files are needed.
-        data_files = {"train": data_args.train_file, "validation": data_args.validation_file}
-
-        # Get the test dataset: you can provide your own CSV/JSON test file (see below)
-        # when you use `do_predict` without specifying a GLUE benchmark task.
-        if training_args.do_predict:
-            if data_args.test_file is not None:
-                train_extension = data_args.train_file.split(".")[-1]
-                test_extension = data_args.test_file.split(".")[-1]
-                assert (
-                    test_extension == train_extension
-                ), "`test_file` should have the same extension (csv or json) as `train_file`."
-                data_files["test"] = data_args.test_file
-            else:
-                raise ValueError("Need either a GLUE task or a test file for `do_predict`.")
-
-        for key in data_files.keys():
-            logger.info(f"load a local file for {key}: {data_files[key]}")
-
-        if data_args.train_file.endswith(".csv"):
-            # Loading a dataset from local csv files
-            datasets = load_dataset("csv", data_files=data_files)
-        else:
-            # Loading a dataset from local json files
-            datasets = load_dataset("json", data_files=data_files)
+        raise ValueError("task_name cannot be None")
     # See more about loading any type of standard or custom dataset at
     # https://huggingface.co/docs/datasets/loading_datasets.html.
 
     # Labels
-    if data_args.task_name is not None:
-        is_regression = data_args.task_name == "stsb"
-        if not is_regression:
-            label_list = datasets["train"].features["label"].names
-            num_labels = len(label_list)
-        else:
-            num_labels = 1
+    is_regression = data_args.task_name == "stsb"
+    if not is_regression:
+        label_list = datasets["train"].features["label"].names
+        num_labels = len(label_list)
     else:
-        # Trying to have good defaults here, don't hesitate to tweak to your needs.
-        is_regression = datasets["train"].features["label"].dtype in ["float32", "float64"]
-        if is_regression:
-            num_labels = 1
-        else:
-            # A useful fast method:
-            # https://huggingface.co/docs/datasets/package_reference/main_classes.html#datasets.Dataset.unique
-            label_list = datasets["train"].unique("label")
-            label_list.sort()  # Let's sort it for determinism
-            num_labels = len(label_list)
+        num_labels = 1
 
     # Load pretrained model and tokenizer
     #
     # In distributed training, the .from_pretrained methods guarantee that only one local process can concurrently
     # download model & vocab.
-    config = AutoConfig.from_pretrained(
-        model_args.config_name if model_args.config_name else model_args.model_name_or_path,
-        num_labels=num_labels,
-        finetuning_task=data_args.task_name,
-        cache_dir=model_args.cache_dir,
-        revision=model_args.model_revision,
-        use_auth_token=True if model_args.use_auth_token else None,
-    )
     tokenizer = AutoTokenizer.from_pretrained(
         model_args.tokenizer_name if model_args.tokenizer_name else model_args.model_name_or_path,
-        cache_dir=model_args.cache_dir,
-        use_fast=model_args.use_fast_tokenizer,
-        revision=model_args.model_revision,
-        use_auth_token=True if model_args.use_auth_token else None,
     )
     model = AutoModelForSequenceClassification.from_pretrained(
         model_args.model_name_or_path,
-        from_tf=bool(".ckpt" in model_args.model_name_or_path),
-        config=config,
-        cache_dir=model_args.cache_dir,
-        revision=model_args.model_revision,
-        use_auth_token=True if model_args.use_auth_token else None,
     )
+    student_model = AutoModelForSequenceClassification.from_pretrained(
+        model_args.student_model,
+    ) if model_args.student_model is not None else None
 
     # Preprocessing the datasets
     if data_args.task_name is not None:
         sentence1_key, sentence2_key = task_to_keys[data_args.task_name]
     else:
-        # Again, we try to have some nice defaults but don't hesitate to tweak to your use case.
-        non_label_column_names = [name for name in datasets["train"].column_names if name != "label"]
-        if "sentence1" in non_label_column_names and "sentence2" in non_label_column_names:
-            sentence1_key, sentence2_key = "sentence1", "sentence2"
-        else:
-            if len(non_label_column_names) >= 2:
-                sentence1_key, sentence2_key = non_label_column_names[:2]
-            else:
-                sentence1_key, sentence2_key = non_label_column_names[0], None
+        raise ValueError("task_name must be defined")
 
     # Padding strategy
     if data_args.pad_to_max_length:
@@ -419,10 +388,6 @@ def main():
     if data_args.task_name is not None or data_args.test_file is not None:
         test_dataset = datasets["test_matched" if data_args.task_name == "mnli" else "test"]
 
-    # Log a few random samples from the training set:
-    for index in random.sample(range(len(train_dataset)), 3):
-        logger.info(f"Sample {index} of the training set: {train_dataset[index]}.")
-
     # Get the metric function
     if data_args.task_name is not None:
         # metric = load_metric("glue", data_args.task_name)
@@ -434,12 +399,9 @@ def main():
     if data_args.task_name is None:
         training_args.metric_for_best_model = "combined_score"
         training_args.greater_is_better = True
-    elif data_args.task_name == "cola":
-        training_args.metric_for_best_model = "matthews_correlation"
-        training_args.greater_is_better = True
     elif is_regression:
-        training_args.metric_for_best_model = "combined_score"
-        training_args.greater_is_better = True
+        training_args.metric_for_best_model = "mse"
+        training_args.greater_is_better = False
     else:
         training_args.metric_for_best_model = "accuracy"
         training_args.greater_is_better = True
@@ -467,94 +429,103 @@ def main():
     else:
         data_collator = None
 
-    # Initialize our Trainer
-    trainer = DistillBertTrainer(
-        teacher=model,
-        args=training_args,
-        train_dataset=train_dataset,
-        eval_dataset=eval_dataset if training_args.do_eval else None,
-        compute_metrics=compute_metrics,
-        tokenizer=tokenizer,
-        data_collator=data_collator,
-    )
+    model.to(training_args.device)
+    if student_model is not None:
+        student_model.to(training_args.device)
 
-    # Training
-    if training_args.do_train:
-        if last_checkpoint is not None:
-            checkpoint = last_checkpoint
-        elif os.path.isdir(model_args.model_name_or_path):
-            checkpoint = model_args.model_name_or_path
-        else:
-            checkpoint = None
-        train_result = trainer.train()
-        metrics = train_result.metrics
+    model.eval()
+     
 
-        trainer.save_model()  # Saves the tokenizer too for easy upload
 
-        output_train_file = os.path.join(training_args.output_dir, "train_results.txt")
-        if trainer.is_world_process_zero():
-            with open(output_train_file, "w") as writer:
-                logger.info("***** Train results *****")
-                for key, value in sorted(metrics.items()):
-                    logger.info(f"  {key} = {value}")
-                    writer.write(f"{key} = {value}\n")
+    def _remove_unused_columns(dataset: Dataset, description: Optional[str] = None):
+        if not training_args.remove_unused_columns:
+            return
+        # Inspect model forward signature to keep only the arguments it accepts.
+        signature = inspect.signature(model.forward)
+        signature_columns = list(signature.parameters.keys())
+        # Labels may be named label or label_ids, the default data collator handles that.
+        signature_columns += ["label", "label_ids"]
+        columns = [k for k in signature_columns if k in dataset.column_names]
+        ignored_columns = list(set(dataset.column_names) - set(signature_columns))
+        dset_description = "" if description is None else f"in the {description} set "
+        logger.info(
+            f"The following columns {dset_description}don't have a corresponding argument in `{model.__class__.__name__}.forward` and have been ignored: {', '.join(ignored_columns)}."
+        )
+        dataset.set_format(type=dataset.format["type"], columns=columns)
 
-            # Need to save the state, since Trainer.save_model saves only the tokenizer with the model
-            trainer.state.save_to_json(os.path.join(training_args.output_dir, "trainer_state.json"))
+    _remove_unused_columns(eval_dataset)
+    eval_dataloader = DataLoader(eval_dataset, training_args.eval_batch_size, sampler=SequentialSampler(eval_dataset), collate_fn=default_data_collator)
 
-    # Evaluation
-    eval_results = {}
-    if training_args.do_eval:
-        logger.info("*** Evaluate ***")
+    mets = []
+    output_cat = None
+    labels_cat = None
+    with torch.no_grad():
+        for step, batch in enumerate(tqdm(eval_dataloader, desc=f"Evaluating {data_args.task_name}")): 
+            for k, v in batch.items():
+                if isinstance(v, torch.Tensor):
+                    batch[k] = v.to(training_args.device)
+            if data_args.task_name in []: 
+                outputs = model(batch["input_ids"], attention_mask = batch["attention_mask"], labels = batch["labels"])
+            else:
+                outputs = model(**batch)
+            output_cat = outputs.logits if output_cat is None else torch.cat([output_cat, outputs.logits], dim=0)
+            labels_cat = batch["labels"] if labels_cat is None else torch.cat([labels_cat, batch["labels"]], dim=0)
 
-        # Loop to handle MNLI double evaluation (matched, mis-matched)
-        tasks = [data_args.task_name]
-        eval_datasets = [eval_dataset]
-        if data_args.task_name == "mnli":
-            tasks.append("mnli-mm")
-            eval_datasets.append(datasets["validation_mismatched"])
+        @dataclass 
+        class AnClass:
+            predictions: torch.Tensor
+            label_ids: torch.Tensor
+            # mets.append(compute_metrics(AnClass(predictions=outputs.logits.detach().cpu().numpy(), label_ids=batch["labels"].detach().cpu().numpy())))
+        mets = compute_metrics(AnClass(predictions=output_cat.detach().cpu().numpy(), label_ids=labels_cat.detach().cpu().numpy()))
+    print("METRICS: ", mets)
 
-        for eval_dataset, task in zip(eval_datasets, tasks):
-            eval_result = trainer.evaluate(eval_dataset=eval_dataset)
+    
+    _remove_unused_columns(test_dataset)
+    tasks = [data_args.task_name]
+    test_loaders = [DataLoader(test_dataset, training_args.eval_batch_size, sampler=SequentialSampler(test_dataset), collate_fn=default_data_collator)]
+    if data_args.task_name == "mnli": 
+        tasks.append("mnli-mm")
+        mismatched = datasets["test_mismatched"]
+        _remove_unused_columns(mismatched)
+        test_loaders.append(DataLoader(mismatched, training_args.eval_batch_size, sampler=SequentialSampler(mismatched), collate_fn=default_data_collator))
 
-            output_eval_file = os.path.join(training_args.output_dir, f"eval_results_{task}.txt")
-            if trainer.is_world_process_zero():
-                with open(output_eval_file, "w") as writer:
-                    logger.info(f"***** Eval results {task} *****")
-                    for key, value in sorted(eval_result.items()):
-                        logger.info(f"  {key} = {value}")
-                        writer.write(f"{key} = {value}\n")
+    if student_model is None: 
+        metric_suite = MetricSuite(training_args.output_dir, model.config)
+    else: 
+        metric_suite = MetricSuite(training_args.output_dir, model.config, student_model.config)
 
-            eval_results.update(eval_result)
-
-    if training_args.do_predict:
-        logger.info("*** Test ***")
-
-        # Loop to handle MNLI double evaluation (matched, mis-matched)
-        tasks = [data_args.task_name]
-        test_datasets = [test_dataset]
-        if data_args.task_name == "mnli":
-            tasks.append("mnli-mm")
-            test_datasets.append(datasets["test_mismatched"])
-
-        for test_dataset, task in zip(test_datasets, tasks):
-            # Removing the `label` columns because it contains -1 and Trainer won't like that.
-            test_dataset = test_dataset.remove_columns("label")
-            predictions = trainer.predict(test_dataset=test_dataset).predictions
-            predictions = np.squeeze(predictions) if is_regression else np.argmax(predictions, axis=1)
-
+    with torch.no_grad():
+        for task, test_loader in zip(tasks, test_loaders):
             output_test_file = os.path.join(training_args.output_dir, f"test_results_{task}.txt")
-            if trainer.is_world_process_zero():
-                with open(output_test_file, "w") as writer:
-                    logger.info(f"***** Test results {task} *****")
-                    writer.write("index\tprediction\n")
+            with open(output_test_file, "a") as writer:
+                writer.write(f"index\tprediction\n")
+            counter = 0
+            for step, batch in enumerate(tqdm(test_loader, desc=f"Testing {task}:")): 
+                for k, v in batch.items():
+                    if isinstance(v, torch.Tensor):
+                        batch[k] = v.to(training_args.device)
+                batch["labels"] = None
+                outputs = model(**batch, output_hidden_states=True)
+                predictions = outputs.logits[:, 0] if is_regression else torch.argmax(outputs.logits, dim=-1)
+
+                if student_model is not None: 
+                    student_outputs = student_model(**batch, output_hidden_states=True)
+                    predictions = outputs.logits[:, 0] if is_regression else torch.argmax(outputs.logits, dim=-1)
+
+                with open(output_test_file, "a") as writer:
                     for index, item in enumerate(predictions):
                         if is_regression:
-                            writer.write(f"{index}\t{item:3.3f}\n")
+                            writer.write(f"{counter}\t{item:3.3f}\n")
                         else:
                             item = label_list[item]
-                            writer.write(f"{index}\t{item}\n")
-    return eval_results
+                            writer.write(f"{counter}\t{item}\n")
+                        counter += 1
+                if student_model is None: 
+                    metric_suite.compute_accum(outputs.hidden_states)
+                else: 
+                    metric_suite.compute_accum(outputs.hidden_states, student_outputs.hidden_states)
+                metric_suite.savefigs() 
+            
 
 
 def _mp_fn(index):
