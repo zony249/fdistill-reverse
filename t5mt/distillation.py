@@ -5,7 +5,7 @@ import gc
 import os
 import sys
 from pathlib import Path
-from typing import List
+from typing import List, Dict
 
 import pytorch_lightning as pl
 import torch
@@ -230,12 +230,31 @@ class SummarizationDistiller(TranslationModule):
                 normalize_hidden=self.hparams.normalize_hidden,
             )
 
+        student_lm_loss = student_lm_loss if self.alpha_mlm > 0 else student_lm_loss * 0
+        loss_ce = loss_ce if self.alpha_ce > 0 else loss_ce * 0
+        hid_loss_enc = hid_loss_enc if self.hparams.alpha_hid > 0 else hid_loss_enc * 0
+        hid_loss_dec = hid_loss_dec if self.hparams.alpha_hid > 0 else hid_loss_dec * 0
+
         blended_loss = (
             self.alpha_ce * loss_ce
             + self.alpha_mlm * student_lm_loss
             + self.hparams.alpha_hid * (hid_loss_enc + (hid_loss_dec if not self.no_decoder_matching else 0))
         )
         return blended_loss, loss_ce, student_lm_loss, hid_loss_enc, hid_loss_dec
+
+
+    def training_step(self, batch, batch_idx) -> Dict:
+        loss_tensors = self._step(batch)
+
+        logs = {name: loss for name, loss in zip(self.loss_names, loss_tensors)}
+        # tokens per batch
+        logs["tpb"] = batch["input_ids"].ne(self.pad).sum() + batch["labels"].ne(self.pad).sum()
+        logs["bs"] = batch["input_ids"].shape[0]
+        logs["src_pad_tok"] = batch["input_ids"].eq(self.pad).sum()
+        logs["src_pad_frac"] = batch["input_ids"].eq(self.pad).float().mean()
+        # TODO(SS): make a wandb summary metric for this
+        progress_bar = {k: v for k, v in logs.items() if k != "loss"}
+        return {"loss": loss_tensors[0], "log": logs, "progress_bar": progress_bar}
 
     # @staticmethod
     def calc_hidden_loss(self, attention_mask, hidden_states, hidden_states_T, matches, normalize_hidden, only_the_last=False):
