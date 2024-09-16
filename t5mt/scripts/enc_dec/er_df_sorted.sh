@@ -4,7 +4,7 @@
 #SBATCH --mem=32000 # 100M for the whole job 
 #SBATCH --time=2-23:00 # walltime in d-hh:mm or hh:mm:ss format
 #SBATCH --account=rrg-lilimou 
-#SBATCH --gres=gpu:1 # GPUs per node
+#SBATCH --gpus-per-node=v100l:1 # GPUs per node
 #SBATCH --output=slurm-logs/slurm-%j-er-df-sorted-6-layer.out
 
 nvidia-smi
@@ -23,7 +23,7 @@ python distillation.py \
   --data_dir wmt_en-ro_100k \
   --tokenizer_name $TEACHER \
   --student_decoder_layers 6 --student_encoder_layers 6 \
-  --learning_rate=1e-3 \
+  --learning_rate=1e-4 \
   --freeze_embeds \
   --temperature 2. \
   --do_train \
