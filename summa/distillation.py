@@ -5,7 +5,7 @@ import gc
 import os
 import sys
 from pathlib import Path
-from typing import List
+from typing import List, Dict
 
 import pytorch_lightning as pl
 import torch
@@ -103,9 +103,18 @@ class SummarizationDistiller(SummarizationModule):
         else:
             self.e_matches = None
             self.d_matches = None
+        
+        self.student_layer_to_match = hparams.match_layers 
+        self.to_teacher_layer = hparams.to
+        self.no_decoder_matching = hparams.no_decoder_matching
+        self.no_encoder_matching = hparams.no_encoder_matching
 
-        print("Encoder Layers Supervised:", self.e_matches)
-        print("Decoder Layers Supervised:", self.d_matches)
+        if self.student_layer_to_match is not None and self.to_teacher_layer is not None: 
+            print("Encoder Layer Supervised:", self.student_layer_to_match, "match to", self.to_teacher_layer)
+            print("Decoder Layer Supervised:", self.student_layer_to_match, "match to", self.to_teacher_layer)
+        else: 
+            print("Encoder Layers Supervised:", self.e_matches if not self.no_encoder_matching else None)
+            print("Decoder Layers Supervised:", self.d_matches if not self.no_decoder_matching else None)
 
         print("========== STUDENT ARCHITECTURE ===========")
         print(student)
@@ -220,34 +229,70 @@ class SummarizationDistiller(SummarizationModule):
                 normalize_hidden=self.hparams.normalize_hidden,
             )
 
+        student_lm_loss = student_lm_loss if self.alpha_mlm > 0 else student_lm_loss * 0
+        loss_ce = loss_ce if self.alpha_ce > 0 else loss_ce * 0
+        hid_loss_enc = hid_loss_enc if self.hparams.alpha_hid > 0 else hid_loss_enc * 0
+        hid_loss_dec = hid_loss_dec if self.hparams.alpha_hid > 0 else hid_loss_dec * 0
+
         blended_loss = (
             self.alpha_ce * loss_ce
             + self.alpha_mlm * student_lm_loss
-            + self.hparams.alpha_hid * (hid_loss_enc + hid_loss_dec)
+            + self.hparams.alpha_hid * ((hid_loss_enc if not self.no_encoder_matching else 0) + (hid_loss_dec if not self.no_decoder_matching else 0))
         )
         return blended_loss, loss_ce, student_lm_loss, hid_loss_enc, hid_loss_dec
 
-    @staticmethod
-    def calc_hidden_loss(attention_mask, hidden_states, hidden_states_T, matches, normalize_hidden):
+
+    def training_step(self, batch, batch_idx) -> Dict:
+        loss_tensors = self._step(batch)
+
+        logs = {name: loss for name, loss in zip(self.loss_names, loss_tensors)}
+        # tokens per batch
+        logs["tpb"] = batch["input_ids"].ne(self.pad).sum() + batch["labels"].ne(self.pad).sum()
+        logs["bs"] = batch["input_ids"].shape[0]
+        logs["src_pad_tok"] = batch["input_ids"].eq(self.pad).sum()
+        logs["src_pad_frac"] = batch["input_ids"].eq(self.pad).float().mean()
+        # TODO(SS): make a wandb summary metric for this
+        progress_bar = {k: v for k, v in logs.items() if k != "loss"}
+        return {"loss": loss_tensors[0], "log": logs, "progress_bar": progress_bar}
+
+    # @staticmethod
+    def calc_hidden_loss(self, attention_mask, hidden_states, hidden_states_T, matches, normalize_hidden, only_the_last=False):
         """MSE(student_hid, teacher_hid[matches]). Called "Intermediate supervision" in paper. Inspired by TinyBERT."""
         msg = "expected list or tuple for hidden_states, got tensor of shape: "
         assert not isinstance(hidden_states, torch.Tensor), f"{msg}{hidden_states.shape}"
         assert not isinstance(hidden_states_T, torch.Tensor), f"{msg}{hidden_states_T.shape}"
 
-        # add embedding layer
-        matches = [0] + [i + 1 for i in matches]
+        if self.student_layer_to_match is not None and self.to_teacher_layer is not None:
+            student_state = hidden_states[self.student_layer_to_match] 
+            teacher_state = hidden_states_T[self.to_teacher_layer]
+            if normalize_hidden:
+                student_state = F.layer_norm(student_state, student_state.shape[:])
+                teacher_state = F.layer_norm(teacher_state, teacher_state.shape[:])
+            mask = attention_mask.to(hidden_states[0]) # [batch, seq_len]
+            valid_count = mask.sum() * hidden_states[0].size(-1)
+            mse = F.mse_loss(student_state, teacher_state, reduction="none") # [batch, seq_len, hidden]
+            masked_mse = (mse * mask[:, :, None]).sum() / valid_count 
+            return masked_mse
 
-        mask = attention_mask.to(hidden_states[0])
-        valid_count = mask.sum() * hidden_states[0].size(-1)
-        student_states = torch.stack([hidden_states[i] for i in range(len(matches))])
-        teacher_states = torch.stack([hidden_states_T[j] for j in matches])
-        assert student_states.shape == teacher_states.shape, f"{student_states.shape} != {teacher_states.shape}"
-        if normalize_hidden:
-            student_states = F.layer_norm(student_states, student_states.shape[1:])
-            teacher_states = F.layer_norm(teacher_states, teacher_states.shape[1:])
-        mse = F.mse_loss(student_states, teacher_states, reduction="none")
-        masked_mse = (mse * mask.unsqueeze(0).unsqueeze(-1)).sum() / valid_count
-        return masked_mse
+        else:
+            # add embedding layer
+            matches = [0] + [i + 1 for i in matches]
+
+            mask = attention_mask.to(hidden_states[0])
+            valid_count = mask.sum() * hidden_states[0].size(-1)
+            if only_the_last:
+                student_states = torch.stack([hidden_states[-1]])
+                teacher_states = torch.stack([hidden_states_T[-1]])
+            else:
+                student_states = torch.stack([hidden_states[i] for i in range(len(matches))])
+                teacher_states = torch.stack([hidden_states_T[j] for j in matches])
+            assert student_states.shape == teacher_states.shape, f"{student_states.shape} != {teacher_states.shape}"
+            if normalize_hidden:
+                student_states = F.layer_norm(student_states, student_states.shape[1:])
+                teacher_states = F.layer_norm(teacher_states, teacher_states.shape[1:])
+            mse = F.mse_loss(student_states, teacher_states, reduction="none")
+            masked_mse = (mse * mask.unsqueeze(0).unsqueeze(-1)).sum() / valid_count
+            return masked_mse
 
 
 def add_distill_args(parser):
@@ -271,6 +316,10 @@ def add_distill_args(parser):
     parser.add_argument("--reverse_encoder", action="store_true", default=False)
     parser.add_argument("--reverse_decoder", action="store_true", default=False)
     parser.add_argument("--copy_same_order", action="store_true", default=False, help="whether to copy the layers in same order as matching, or maintain consecutive order copying")
+    parser.add_argument("--match_layers", type=int, default=None, help="student layer to match")
+    parser.add_argument("--to", type=int, default=None, help="match student layer from argument '--match_layers' to teacher layer specified")
+    parser.add_argument("--no_encoder_matching", action="store_true", default=False, help="disables encoder matching.")
+    parser.add_argument("--no_decoder_matching", action="store_true", default=False, help="disables decoder matching.")
 
 
 class TranslationDistiller(SummarizationDistiller):
@@ -323,5 +372,12 @@ if __name__ == "__main__":
     parser = pl.Trainer.add_argparse_args(parser)
     parser = SummarizationDistiller.add_model_specific_args(parser, os.getcwd())
     args = parser.parse_args()
+    
+    if args.match_layers is None and args.to is not None:
+        raise ValueError("if match_layers is none, then to should also be none")
+    if args.match_layers is not None and args.to is None: 
+        raise ValueError("if match layers is defined, to should also be defined")
+
+
 
     distill_main(args)
