@@ -108,12 +108,13 @@ class SummarizationDistiller(TranslationModule):
         self.student_layer_to_match = hparams.match_layers 
         self.to_teacher_layer = hparams.to
         self.no_decoder_matching = hparams.no_decoder_matching
+        self.no_encoder_matching = hparams.no_encoder_matching
 
         if self.student_layer_to_match is not None and self.to_teacher_layer is not None: 
             print("Encoder Layer Supervised:", self.student_layer_to_match, "match to", self.to_teacher_layer)
             print("Decoder Layer Supervised:", self.student_layer_to_match, "match to", self.to_teacher_layer)
         else: 
-            print("Encoder Layers Supervised:", self.e_matches)
+            print("Encoder Layers Supervised:", self.e_matches if not self.no_encoder_matching else None)
             print("Decoder Layers Supervised:", self.d_matches if not self.no_decoder_matching else None)
 
         print("========== STUDENT ARCHITECTURE ===========")
@@ -238,7 +239,7 @@ class SummarizationDistiller(TranslationModule):
         blended_loss = (
             self.alpha_ce * loss_ce
             + self.alpha_mlm * student_lm_loss
-            + self.hparams.alpha_hid * (hid_loss_enc + (hid_loss_dec if not self.no_decoder_matching else 0))
+            + self.hparams.alpha_hid * ((hid_loss_enc if not self.no_encoder_matching else 0) + (hid_loss_dec if not self.no_decoder_matching else 0))
         )
         return blended_loss, loss_ce, student_lm_loss, hid_loss_enc, hid_loss_dec
 
@@ -319,7 +320,8 @@ def add_distill_args(parser):
     parser.add_argument("--copy_same_order", action="store_true", default=False, help="whether to copy the layers in same order as matching, or maintain consecutive order copying")
     parser.add_argument("--match_layers", type=int, default=None, help="student layer to match")
     parser.add_argument("--to", type=int, default=None, help="match student layer from argument '--match_layers' to teacher layer specified")
-    parser.add_argument("--no_decoder_matching", action="store_true", default=False, help="disables decoder matching. does not apply in --match_layers--to mode")
+    parser.add_argument("--no_encoder_matching", action="store_true", default=False, help="disables encoder matching.")
+    parser.add_argument("--no_decoder_matching", action="store_true", default=False, help="disables decoder matching.")
 
 
 class TranslationDistiller(SummarizationDistiller):
