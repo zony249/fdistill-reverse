@@ -4,7 +4,7 @@
 #SBATCH --mem=32000 # 100M for the whole job 
 #SBATCH --time=2-23:00 # walltime in d-hh:mm or hh:mm:ss format
 #SBATCH --account=rrg-lilimou 
-#SBATCH --gres=gpu:1 # GPUs per node
+#SBATCH --gpus-per-node=v100l:1 # GPUs per node
 #SBATCH --output=slurm-logs/slurm-%j-wmt-student-mle-6-layer.out
 
 nvidia-smi
@@ -37,7 +37,6 @@ python distillation.py \
   --output_dir $MODEL_OUTPUT_PATH\
   --overwrite_output_dir\
   --seed $SEED \
-  --overwrite_output_dir\
   "$@"
 
 
