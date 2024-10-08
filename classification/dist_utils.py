@@ -24,6 +24,15 @@ COLOURS = {
 }
 
 
+LAYER_MAP = {
+    1: [11], 
+    2: [5, 11],
+    3: [3, 7, 11], 
+    4: [2, 5, 8, 11], 
+    6: [1, 3, 5, 7, 9, 11], 
+    12: list(range(12)) 
+}
+
 class Measure: 
     def __init__(self): 
         self.val=0
@@ -103,6 +112,8 @@ class TransformDistance(Measure):
         """
         self.val = (hidden_1 - hidden_2).norm(dim=-1).mean(dim=(0, 2))
         return self
+    
+
 class MeanPairwiseLayerTransformDist(Measure): 
     def __init__(self):
         super().__init__() 
@@ -124,6 +135,33 @@ class MeanPairwiseLayerTransformDist(Measure):
         self.val = means 
         return self
 
+class MeanPairwiseLayerTransformCosine(Measure): 
+    def __init__(self): 
+        super().__init__() 
+    def compute(self, hidden_1, hidden_2): 
+        """
+        hidden_1: torch.Tensor[batch, layers_1, seq_len, hidden]
+        hidden_1: torch.Tensor[batch, layers_2, seq_len, hidden]
+        produces: torch.Tensor[layers_1, layers_2]
+        """
+        layers_1 = hidden_1.shape[1]
+        layers_2 = hidden_2.shape[1]
+        seq_len = min(hidden_1.shape[2], hidden_2.shape[2]) 
+        dim = hidden_1.shape[-1]
+
+        hid_1_len_trunc = hidden_1[:, :, :seq_len, :]
+        hid_2_len_trunc = hidden_2[:, :, :seq_len, :]
+
+        uv = (hid_1_len_trunc[:, :, None, :, :] * hid_2_len_trunc[:, None, :, :, :]).sum(dim=-1) # [batch, layers1, layers2, seq_len]
+        uu = (hid_1_len_trunc[:, :, None, :, :]).norm(dim=-1) # [batch, layer1, 1, seq_len]
+        vv = (hid_2_len_trunc[:, None, :, :, :]).norm(dim=-1) # [batch, 1, layer2, seq_len]
+        cosines_raw = uv / (uu * vv)
+        seq_batch_concat = torch.movedim(cosines_raw, 3, 1).reshape(-1, layers_1, layers_2) # [batch x seq, layers_1, layers_2]
+        means = seq_batch_concat.mean(dim=0)
+        self.val = means 
+        return self
+
+
 class MeanLayerDistance(Measure): 
     def __init__(self): 
         super().__init__()
@@ -138,6 +176,103 @@ class MeanLayerDistance(Measure):
         else: 
             self.val = pairwise_layer_dist.mean()
         return self
+
+class MeanPairwiseCosine(Measure): 
+    def __init__(self): 
+        super().__init__()
+    def compute(self, hidden_1, hidden_2): 
+        """
+        hidden_1: torch.Tensor[batch, layers_1, seq_len, hidden]
+        hidden_1: torch.Tensor[batch, layers_2, seq_len, hidden]
+        produces: torch.Tensor[layers_1, layers_2]
+        """
+        layers_1 = hidden_1.shape[1]
+        layers_2 = hidden_2.shape[1]
+        seq_len = min(hidden_1.shape[2], hidden_2.shape[2]) 
+        dim = hidden_1.shape[-1]
+
+        hidden_1 = hidden_1[:, :, :seq_len, :]
+        hidden_2 = hidden_2[:, :, :seq_len, :]
+
+        mean1 = hidden_1.mean(dim=(0, 1, 2), keepdim=True)
+        mean2 = hidden_2.mean(dim=(0, 1, 2), keepdim=True)
+        centered_1 = (hidden_1)[:, :, None, :, :]
+        centered_2 = (hidden_2)[:, None, :, :, :]
+
+        uv = (centered_1 * centered_2).sum(dim=-1) #[batch, layer1, layer2, seq_len]
+        uu = centered_1.norm(dim=-1)
+        vv = centered_2.norm(dim=-1)
+
+        cosines = torch.movedim(uv / (uu * vv), 3, 1).reshape(-1, layers_1, layers_2) #[batch x seq_len, layer1, layer2]
+        cosines = cosines.mean(dim=0)
+        self.val = cosines 
+        return self
+
+
+class MeanNormedPairwiseCosine(Measure): 
+    def __init__(self): 
+        super().__init__()
+    def compute(self, hidden_1, hidden_2): 
+        """
+        hidden_1: torch.Tensor[batch, layers_1, seq_len, hidden]
+        hidden_1: torch.Tensor[batch, layers_2, seq_len, hidden]
+        produces: torch.Tensor[layers_1, layers_2]
+        """
+        layers_1 = hidden_1.shape[1]
+        layers_2 = hidden_2.shape[1]
+        seq_len = min(hidden_1.shape[2], hidden_2.shape[2]) 
+        dim = hidden_1.shape[-1]
+
+        hidden_1 = hidden_1[:, :, :seq_len, :]
+        hidden_2 = hidden_2[:, :, :seq_len, :]
+
+        mean1 = hidden_1.mean(dim=(0, 1, 2), keepdim=True)
+        mean2 = hidden_2.mean(dim=(0, 1, 2), keepdim=True)
+        mean = (hidden_1.shape[1] * mean1 + hidden_2.shape[1] * mean2) / (hidden_1.shape[1] + hidden_2.shape[1])
+        centered_1 = (hidden_1 - mean)[:, :, None, :, :]
+        centered_2 = (hidden_2 - mean)[:, None, :, :, :]
+
+        uv = (centered_1 * centered_2).sum(dim=-1) #[batch, layer1, layer2, seq_len]
+        uu = centered_1.norm(dim=-1)
+        vv = centered_2.norm(dim=-1)
+
+        cosines = torch.movedim(uv / (uu * vv), 3, 1).reshape(-1, layers_1, layers_2) #[batch x seq_len, layer1, layer2]
+        cosines = cosines.mean(dim=0)
+        self.val = cosines 
+        return self
+
+class MeanNormedCosine(Measure): 
+    def __init__(self, between_model=False):
+        super().__init__() 
+        self.layer_map = LAYER_MAP
+        self.between_model = between_model
+    def compute(self, pairwise_cosines): 
+        """
+        pairwise_cosines: torch.Tensor[layers_1, layers_2]
+        """
+        if self.between_model:
+            print(pairwise_cosines.shape)
+            num_teacher_layers = pairwise_cosines.shape[0]-1
+            num_student_layers = pairwise_cosines.shape[1]-1 
+            layer_mapping = [0] + [i + 1 for i in self.layer_map[num_student_layers]] if num_student_layers != num_teacher_layers else [0] + [i+1 for i in range(num_student_layers)]
+            print(layer_mapping)
+            total = 0
+            for j in range(num_student_layers): 
+                i = layer_mapping[j] 
+                total += pairwise_cosines[i, :].mean()
+            total /= num_student_layers
+            self.val = total 
+            return self
+        else: 
+            #between layer 
+            if pairwise_cosines.shape[0] == pairwise_cosines.shape[-1]: 
+                lower_tril = torch.tril(pairwise_cosines, diagonal=-1)
+                self.val = lower_tril.sum() / torch.arange(1, pairwise_cosines.shape[0]).sum()
+            else: 
+                self.val = pairwise_cosines.mean()
+            return self
+
+
 
 
 def compute_pca(states:List[torch.Tensor]) -> torch.Tensor: 

@@ -486,6 +486,7 @@ def main():
             checkpoint = model_args.model_name_or_path
         else:
             checkpoint = None
+        trainer.save_model()
         train_result = trainer.train()
         metrics = train_result.metrics
 

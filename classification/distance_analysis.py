@@ -47,7 +47,7 @@ from transformers import (
 from transformers.trainer_utils import get_last_checkpoint, is_main_process
 from transformers.data.data_collator import DataCollator, DataCollatorWithPadding, default_data_collator
 from glue_metrics import Glue
-from dist_utils import MeanLayerDistance, MeanPairwiseLayerTransformDist 
+from dist_utils import MeanLayerDistance, MeanPairwiseLayerTransformDist, MeanPairwiseLayerTransformCosine, MeanNormedPairwiseCosine, MeanNormedCosine, MeanPairwiseCosine
 
 
 task_to_keys = {
@@ -88,18 +88,25 @@ class Writer(object):
 
 
 class MetricSuite: 
-    def __init__(self, savedir, config1, config2=None):
+    def __init__(self, savedir, config1, config2=None, center_hidden_states=False):
         self.savedir = savedir 
         self.config1 = config1
         self.teacher_pairwise_dist = MeanPairwiseLayerTransformDist() 
+        self.teacher_pairwise_cosines = MeanNormedPairwiseCosine() if center_hidden_states else MeanPairwiseCosine()
         self.teacher_mean_dist = MeanLayerDistance() 
+        self.teacher_mean_cosines = MeanNormedCosine()
 
         self.config2 = config2 
         if self.config2 is not None: 
             self.teacher_student_pairwise_dist = MeanPairwiseLayerTransformDist() 
+            self.teacher_student_pairwise_cosines = MeanNormedPairwiseCosine() if center_hidden_states else MeanPairwiseCosine()
             self.teacher_student_mean_dist = MeanLayerDistance()
+            self.teacher_student_mean_cosines = MeanNormedCosine(between_model=True)
+
             self.student_pairwise_dist = MeanPairwiseLayerTransformDist() 
+            self.student_pairwise_cosines = MeanNormedPairwiseCosine() if center_hidden_states else MeanPairwiseCosine()
             self.student_mean_dist = MeanLayerDistance()
+            self.student_mean_cosines = MeanNormedCosine()
 
     def compute_accum(self, hidden_t, hidden_s=None): 
         """
@@ -110,17 +117,23 @@ class MetricSuite:
         hidden_t_stacked = torch.stack(hidden_t, dim=1) #[batch, layers, seq_len, hidden] 
         hidden_s_stacked = torch.stack(hidden_s, dim=1) if hidden_s is not None else None
         self.teacher_pairwise_dist(hidden_t_stacked, hidden_t_stacked).accum()
+        self.teacher_pairwise_cosines(hidden_t_stacked, hidden_t_stacked).accum()
         self.teacher_mean_dist(self.teacher_pairwise_dist.get_val()).accum() 
+        self.teacher_mean_cosines(self.teacher_pairwise_cosines.get_val()).accum() 
         if self.config2 is not None: 
             self.teacher_student_pairwise_dist(hidden_t_stacked, hidden_s_stacked).accum()
+            self.teacher_student_pairwise_cosines(hidden_t_stacked, hidden_s_stacked).accum()
             self.teacher_student_mean_dist(self.teacher_student_pairwise_dist.get_val()).accum()
+            self.teacher_student_mean_cosines(self.teacher_student_pairwise_cosines.get_val()).accum()
             self.student_pairwise_dist(hidden_s_stacked, hidden_s_stacked).accum()
+            self.student_pairwise_cosines(hidden_s_stacked, hidden_s_stacked).accum()
             self.student_mean_dist(self.student_pairwise_dist.get_val()).accum()
+            self.student_mean_cosines(self.student_pairwise_cosines.get_val()).accum()
 
     def savefigs(self): 
-        teacher_teacher = self.teacher_pairwise_dist.get_mean().detach().cpu()
+        teacher_teacher_dist = self.teacher_pairwise_dist.get_mean().detach().cpu()
         fig, ax = plt.subplots(ncols=1, figsize=(5, 4), gridspec_kw={'wspace': 0.5})
-        im1 = ax.imshow(teacher_teacher)
+        im1 = ax.imshow(teacher_teacher_dist)
         ax.set_title("Encoder")
         ax.set_xlabel("Teacher Layer j")
         ax.set_ylabel("Teacher Layer i")
@@ -130,10 +143,22 @@ class MetricSuite:
         plt.savefig(os.path.join(self.savedir, "teacher-pairwise-dist"))
         plt.close()
 
+        teacher_teacher_cosines = self.teacher_pairwise_cosines.get_mean().detach().cpu()
+        fig, ax = plt.subplots(ncols=1, figsize=(5, 4), gridspec_kw={'wspace': 0.5})
+        im1 = ax.imshow(teacher_teacher_cosines)
+        ax.set_title("Encoder")
+        ax.set_xlabel("Teacher Layer j")
+        ax.set_ylabel("Teacher Layer i")
+
+        fig.colorbar(im1, ax=ax)
+
+        plt.savefig(os.path.join(self.savedir, "teacher-pairwise-cosines"))
+        plt.close()
+
         if self.config2 is not None: 
-            teacher_student = self.teacher_student_pairwise_dist.get_mean().detach().cpu()
+            teacher_student_dist = self.teacher_student_pairwise_dist.get_mean().detach().cpu()
             fig, ax = plt.subplots(ncols=1, figsize=(5, 4), gridspec_kw={'wspace': 0.5})
-            im1 = ax.imshow(teacher_student)
+            im1 = ax.imshow(teacher_student_dist)
             ax.set_title("Encoder")
             ax.set_xlabel("Student Layer j")
             ax.set_ylabel("Teacher Layer i")
@@ -143,9 +168,21 @@ class MetricSuite:
             plt.savefig(os.path.join(self.savedir, "teacher-student-pairwise-dist"))
             plt.close()
 
-            student_student = self.student_pairwise_dist.get_mean().detach().cpu()
+            teacher_student_cosines = self.teacher_student_pairwise_cosines.get_mean().detach().cpu()
             fig, ax = plt.subplots(ncols=1, figsize=(5, 4), gridspec_kw={'wspace': 0.5})
-            im1 = ax.imshow(student_student)
+            im1 = ax.imshow(teacher_student_cosines)
+            ax.set_title("Encoder")
+            ax.set_xlabel("Student Layer j")
+            ax.set_ylabel("Teacher Layer i")
+
+            fig.colorbar(im1, ax=ax)
+
+            plt.savefig(os.path.join(self.savedir, "teacher-student-pairwise-cosines"))
+            plt.close()
+
+            student_student_dist = self.student_pairwise_dist.get_mean().detach().cpu()
+            fig, ax = plt.subplots(ncols=1, figsize=(5, 4), gridspec_kw={'wspace': 0.5})
+            im1 = ax.imshow(student_student_dist)
             ax.set_title("Encoder")
             ax.set_xlabel("Student Layer j")
             ax.set_ylabel("Student Layer i")
@@ -155,24 +192,54 @@ class MetricSuite:
             plt.savefig(os.path.join(self.savedir, "student-pairwise-dist"))
             plt.close()
 
-            with open(os.path.join(self.savedir, "between-model-pairwise.csv"), "w") as f:
+            student_student_cosines = self.student_pairwise_cosines.get_mean().detach().cpu()
+            fig, ax = plt.subplots(ncols=1, figsize=(5, 4), gridspec_kw={'wspace': 0.5})
+            im1 = ax.imshow(student_student_cosines)
+            ax.set_title("Encoder")
+            ax.set_xlabel("Student Layer j")
+            ax.set_ylabel("Student Layer i")
+
+            fig.colorbar(im1, ax=ax)
+
+            plt.savefig(os.path.join(self.savedir, "student-pairwise-cosines"))
+            plt.close()
+
+
+
+
+            with open(os.path.join(self.savedir, "between-model-pairwise-dist.csv"), "w") as f:
                 # indices
                 f.write(f"layer_index,")
-                for i in range(teacher_student.shape[1]):
-                    f.write(f"{i}{',' if i != teacher_student.shape[1]-1 else ''}")
+                for i in range(teacher_student_dist.shape[1]):
+                    f.write(f"{i}{',' if i != teacher_student_dist.shape[1]-1 else ''}")
                 f.write("\n")
-                for i in range(teacher_student.shape[0]): 
+                for i in range(teacher_student_dist.shape[0]): 
                     f.write(f"{i},")
-                    for j in range(teacher_student.shape[1]): 
-                        f.write(f"{teacher_student[i, j].item()}{',' if j != teacher_student.shape[1]-1 else ''}")
+                    for j in range(teacher_student_dist.shape[1]): 
+                        f.write(f"{teacher_student_dist[i, j].item()}{',' if j != teacher_student_dist.shape[1]-1 else ''}")
+                    f.write("\n")
+
+            with open(os.path.join(self.savedir, "between-model-pairwise-cosines.csv"), "w") as f:
+                # indices
+                f.write(f"layer_index,")
+                for i in range(teacher_student_cosines.shape[1]):
+                    f.write(f"{i}{',' if i != teacher_student_cosines.shape[1]-1 else ''}")
+                f.write("\n")
+                for i in range(teacher_student_cosines.shape[0]): 
+                    f.write(f"{i},")
+                    for j in range(teacher_student_cosines.shape[1]): 
+                        f.write(f"{teacher_student_cosines[i, j].item()}{',' if j != teacher_student_cosines.shape[1]-1 else ''}")
                     f.write("\n")
 
         
         with open(os.path.join(self.savedir, "stats.csv"), "w") as f: 
             f.write(f"teacher_mean_dist,{self.teacher_mean_dist.get_val()}\n")
+            f.write(f"teacher_mean_cosines,{self.teacher_mean_cosines.get_val()}\n")
             if self.config2 is not None: 
                 f.write(f"student_mean_dist,{self.student_mean_dist.get_val()}\n")
+                f.write(f"student_mean_cosines,{self.student_mean_cosines.get_val()}\n")
                 f.write(f"between_model_mean_dist,{self.teacher_student_mean_dist.get_val()}\n")
+                f.write(f"between_model_mean_cosines,{self.teacher_student_mean_cosines.get_val()}\n")
 
 
 @dataclass
@@ -267,6 +334,12 @@ class ModelArguments:
         metadata={
             "help": "Will use the token generated when running `transformers-cli login` (necessary to use this script "
             "with private models)."
+        },
+    )
+    center_hidden_states: Optional[bool] = field(
+        default=False,
+        metadata={
+            "help": "centers hidden states for cosine similarity measurement"
         },
     )
 
