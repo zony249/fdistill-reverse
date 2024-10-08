@@ -19,7 +19,20 @@ from transformers import AutoModelForSeq2SeqLM, MBartTokenizer, T5ForConditional
 from transformers.models.bart.modeling_bart import shift_tokens_right
 from utils import calculate_bleu, check_output_dir, freeze_params, label_smoothed_nll_loss, use_task_specific_params
 
-
+class CSVLogger: 
+    def __init__(self, filename, mets=[]):
+        self.filename = filename 
+        self.mets = sorted(mets)
+        print(self.mets)
+        with open(self.filename, "a") as f: 
+            [f.write(f"{d},") for i, d in enumerate(self.mets) if i != len(self.mets)-1] 
+            f.write(f"{self.mets[-1]}\n")
+    def log(self, ordered_dict): 
+        ordered_dict = sorted(ordered_dict, key=lambda x: x[0]) 
+        print_items = [v for k, v in ordered_dict if k in self.mets]
+        with open(self.filename, "a") as f: 
+            [f.write(f"{d},") for i, d in enumerate(print_items) if i != len(print_items)-1] 
+            f.write(f"{print_items[-1]}\n")
 
 # need the parent dir module
 sys.path.insert(2, str(Path(__file__).resolve().parents[1]))
@@ -34,6 +47,8 @@ class SummarizationDistiller(TranslationModule):
         assert Path(hparams.data_dir).exists()
         self.output_dir = Path(hparams.output_dir)
         self.output_dir.mkdir(exist_ok=True)
+
+        self.csvlogger = CSVLogger(os.path.join(self.output_dir, "losses.csv"), mets=self.loss_names)
 
         save_dir = self.output_dir.joinpath("student")
 
@@ -255,6 +270,7 @@ class SummarizationDistiller(TranslationModule):
         logs["src_pad_frac"] = batch["input_ids"].eq(self.pad).float().mean()
         # TODO(SS): make a wandb summary metric for this
         progress_bar = {k: v for k, v in logs.items() if k != "loss"}
+        self.csvlogger.log([(k, v) for k, v in logs.items()])
         return {"loss": loss_tensors[0], "log": logs, "progress_bar": progress_bar}
 
     # @staticmethod
