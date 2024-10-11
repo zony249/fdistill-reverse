@@ -227,7 +227,9 @@ def main():
     else:
         model_args, data_args, training_args = parser.parse_args_into_dataclasses()
 
-    if training_args.match_layer is not None or training_args.match_all_layers is not None: 
+    print(training_args.match_layer, training_args.match_all_layers)
+
+    if training_args.match_layer is not None or training_args.match_all_layers: 
         assert training_args.to is not None, "if --match_layer is specified, --to must be specified" 
     if training_args.to is not None: 
         assert training_args.match_layer is not None or training_args.match_all_layers, "if --to is specified, --match_layer or --match_all_layers must be specified" 

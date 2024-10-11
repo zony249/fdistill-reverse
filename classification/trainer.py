@@ -1893,6 +1893,7 @@ class DistillBertTrainer(Trainer):
         else: 
             self.match_one_layer = None
             self.match_to = None
+            self.match_all_layers = False
             print(f"reverse: {self.reverse}")
             print(f"layer_matching: {self.layer_matching}")
         print(f"metric_for_best_model: {self.args.metric_for_best_model}")
