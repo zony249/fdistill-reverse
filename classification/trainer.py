@@ -1859,7 +1859,7 @@ class DistillBertTrainer(Trainer):
 
         self.teacher = teacher.to(kwargs["args"].device)
         self.num_student_layers = kwargs["args"].num_student_layers
-        model = self.init_student_from_teacher(teacher=self.teacher, layers_to_copy=LAYER_MAP[self.num_student_layers])
+        model = self.init_student_from_teacher(teacher=self.teacher, layers_to_copy=LAYER_MAP[self.num_student_layers], random_init = kwargs["args"].random_init_student)
         
         kwargs["model"] = model
 
@@ -1885,10 +1885,11 @@ class DistillBertTrainer(Trainer):
         print("======= STUDENT ARCHITECTURE ========")
         print(self.model)
         print("======= MATCHING STRATEGY =======")
-        if self.args.match_layer is not None and self.args.to is not None: 
+        if (self.args.match_layer is not None or self.args.match_all_layers is not None) and self.args.to is not None: 
             self.match_one_layer = self.args.match_layer 
+            self.match_all_layers = self.args.match_all_layers 
             self.match_to = self.args.to
-            print(f"layer_matching: {self.match_one_layer} of student to {self.match_to} of teacher")
+            print(f"layer_matching: {self.match_one_layer if not self.match_all_layers else 'all layers'} of student to {self.match_to} of teacher")
         else: 
             self.match_one_layer = None
             self.match_to = None
@@ -1897,7 +1898,7 @@ class DistillBertTrainer(Trainer):
         print(f"metric_for_best_model: {self.args.metric_for_best_model}")
 
 
-    def init_student_from_teacher(self, teacher: PreTrainedModel, layers_to_copy: List[int]) -> PreTrainedModel: 
+    def init_student_from_teacher(self, teacher: PreTrainedModel, layers_to_copy: List[int], random_init = None) -> PreTrainedModel: 
         
         student_config = deepcopy(teacher.config)
         if isinstance(student_config, BertConfig): 
@@ -1906,7 +1907,8 @@ class DistillBertTrainer(Trainer):
             raise NotImplementedError()
     
         student: PreTrainedModel = AutoModelForSequenceClassification.from_config(student_config)
-
+        if random_init: 
+            return student
         # And then we copy the layers
         if isinstance(student, BertForSequenceClassification): 
             student.bert.embeddings = deepcopy(teacher.bert.embeddings)
@@ -2082,8 +2084,12 @@ class DistillBertTrainer(Trainer):
 
 
         if self.compute_hidden_loss: 
-        
-            if self.match_one_layer is not None and self.match_to is not None: 
+            if self.match_all_layers and self.match_to is not None: 
+                print('match all layers')
+                student_hidden = student_outputs.hidden_states
+                teacher_hidden = [teacher_outputs.hidden_states[self.match_to] for _ in range(len(student_hidden))]
+            elif self.match_one_layer is not None and self.match_to is not None: 
+                print('match one layer')
                 student_hidden = [student_outputs.hidden_states[self.match_one_layer]]
                 teacher_hidden = [teacher_outputs.hidden_states[self.match_to]]
             else:

@@ -272,6 +272,54 @@ class MeanNormedCosine(Measure):
                 self.val = pairwise_cosines.mean()
             return self
 
+class StructuredCosine(Measure): 
+    def __init__(self): 
+        super().__init__() 
+    def compute(self, hidden_t, hidden_s):
+        """
+        hidden_t: torch.Tensor[batch, layers_t, seq_len, hidden]
+        hidden_s: torch.Tensor[batch, layers_s, seq_len, hidden]
+        produces: torch.Tensor[layers_s, layers_s]
+        """
+        num_stu_layers = hidden_s.shape[1]-1
+        teacher_matched_layers = [0] + [i+1 for i in LAYER_MAP[num_stu_layers]] if hidden_t.shape[1] != hidden_s.shape[1] else list(range(hidden_s.shape[1]))
+
+        layers_t = hidden_t.shape[1]
+        layers_s = hidden_s.shape[1]
+        seq_len = min(hidden_t.shape[2], hidden_s.shape[2]) 
+        dim = hidden_t.shape[-1]
+
+        hidden_t_select = hidden_t[:, :, :seq_len][:, teacher_matched_layers]
+        hidden_s_trunc = hidden_s[:, :, :seq_len]
+        assert hidden_t_select.shape[1] == hidden_s_trunc.shape[1], "number of hidden layers don't match"
+
+        print(hidden_t_select.shape)
+        print(hidden_s_trunc.shape)
+
+        hidden_t_grid = hidden_t_select[:, :, None, :, :] - hidden_t_select[:, None, :, :, :]
+        hidden_s_grid = hidden_s_trunc[:, :, None, :, :] - hidden_s_trunc[:, None, :, :, :]
+
+        uv = (hidden_t_grid * hidden_s_grid).sum(dim=-1) # [batch, l, l, seq_len]
+        uu = hidden_t_grid.norm(dim=-1) 
+        vv = hidden_s_grid.norm(dim=-1) 
+
+        cosines = torch.movedim(uv / (uu * vv + 1e-6), -1, 1).reshape(-1, layers_s, layers_s).mean(dim=0)
+        self.val = cosines 
+        return self
+
+class StructuredCosineHistogram(Measure): 
+    def __init__(self): 
+        super().__init__() 
+    def compute(self, struct_cos: torch.Tensor): 
+        """ 
+        struct_cos: torch.Tensor[layers, layers] 
+        """ 
+        mask = torch.tril(torch.ones_like(struct_cos, device=struct_cos.device), diagonal=-1) > 0.5
+        elems = torch.masked_select(struct_cos, mask=mask)
+        self.val = elems
+        # print(self.val)
+        return self
+
 
 
 

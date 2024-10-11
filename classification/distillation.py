@@ -200,9 +200,18 @@ class DistillationArguments(TrainingArguments):
     match_layer: Optional[int] = field(
         default=None, 
         metadata={"help": "Student layer to match (one layer)"})
+
+    match_all_layers: Optional[bool] = field(
+        default=False, 
+        metadata={"help": "all student layers"}
+    )
     to: Optional[int] = field(
         default=None, 
         metadata={"help": "teacher layer to match to"})
+    random_init_student: Optional[bool] = field(
+        default=False, 
+        metadata={"help": "randomly initialize the student"}
+    )
 
 
 def main():
@@ -218,10 +227,11 @@ def main():
     else:
         model_args, data_args, training_args = parser.parse_args_into_dataclasses()
 
-    if training_args.match_layer is not None: 
+    if training_args.match_layer is not None or training_args.match_all_layers is not None: 
         assert training_args.to is not None, "if --match_layer is specified, --to must be specified" 
     if training_args.to is not None: 
-        assert training_args.match_layer is not None, "if --to is specified, --match_layer must be specified" 
+        assert training_args.match_layer is not None or training_args.match_all_layers, "if --to is specified, --match_layer or --match_all_layers must be specified" 
+
 
     # Detecting last checkpoint.
     last_checkpoint = None
