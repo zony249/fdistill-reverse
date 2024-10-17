@@ -63,7 +63,7 @@ class SummarizationDistiller(TranslationModule):
         else:
             student, e_layer_ids, d_layer_ids = create_student_by_copying_alternating_layers(
                 teacher, e=hparams.student_encoder_layers, d=hparams.student_decoder_layers, save_path=save_dir, 
-                reverse_encoder=hparams.reverse_encoder, reverse_decoder=hparams.reverse_decoder, copy_same_order=hparams.copy_same_order
+                reverse_encoder=hparams.reverse_encoder, reverse_decoder=hparams.reverse_decoder, copy_same_order=hparams.copy_same_order, random_init=hparams.random_init_student
             )
 
         if hparams.length_penalty != -1:
@@ -338,6 +338,7 @@ def add_distill_args(parser):
     parser.add_argument("--to", type=int, default=None, help="match student layer from argument '--match_layers' to teacher layer specified")
     parser.add_argument("--no_encoder_matching", action="store_true", default=False, help="disables encoder matching.")
     parser.add_argument("--no_decoder_matching", action="store_true", default=False, help="disables decoder matching.")
+    parser.add_argument("--random_init_student", action="store_true", default=False, help="randomly initializes student")
 
 
 class TranslationDistiller(SummarizationDistiller):
