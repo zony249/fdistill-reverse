@@ -19,6 +19,20 @@ from transformers import AutoModelForSeq2SeqLM, MBartTokenizer, T5ForConditional
 from transformers.models.bart.modeling_bart import shift_tokens_right
 from utils import calculate_bleu, check_output_dir, freeze_params, label_smoothed_nll_loss, use_task_specific_params
 
+class CSVLogger: 
+    def __init__(self, filename, mets=[]):
+        self.filename = filename 
+        self.mets = sorted(mets)
+        print(self.mets)
+        with open(self.filename, "a") as f: 
+            [f.write(f"{d},") for i, d in enumerate(self.mets) if i != len(self.mets)-1] 
+            f.write(f"{self.mets[-1]}\n")
+    def log(self, ordered_dict): 
+        ordered_dict = sorted(ordered_dict, key=lambda x: x[0]) 
+        print_items = [v for k, v in ordered_dict if k in self.mets]
+        with open(self.filename, "a") as f: 
+            [f.write(f"{d},") for i, d in enumerate(print_items) if i != len(print_items)-1] 
+            f.write(f"{print_items[-1]}\n")
 
 # need the parent dir module
 sys.path.insert(2, str(Path(__file__).resolve().parents[1]))
@@ -33,6 +47,8 @@ class SummarizationDistiller(SummarizationModule):
         assert Path(hparams.data_dir).exists()
         self.output_dir = Path(hparams.output_dir)
         self.output_dir.mkdir(exist_ok=True)
+
+        self.csvlogger = CSVLogger(os.path.join(self.output_dir, "losses.csv"), mets=self.loss_names)
 
         save_dir = self.output_dir.joinpath("student")
 
@@ -105,11 +121,15 @@ class SummarizationDistiller(SummarizationModule):
             self.d_matches = None
         
         self.student_layer_to_match = hparams.match_layers 
+        self.match_all_layers = args.match_all_layers
         self.to_teacher_layer = hparams.to
         self.no_decoder_matching = hparams.no_decoder_matching
         self.no_encoder_matching = hparams.no_encoder_matching
-
-        if self.student_layer_to_match is not None and self.to_teacher_layer is not None: 
+        
+        if self.match_all_layers and self.to_teacher_layer is not None: 
+            print("Encoder Layer Supervised: all, match to", self.to_teacher_layer)
+            print("Decoder Layer Supervised: all, match to", self.to_teacher_layer)
+        elif self.student_layer_to_match is not None and self.to_teacher_layer is not None: 
             print("Encoder Layer Supervised:", self.student_layer_to_match, "match to", self.to_teacher_layer)
             print("Decoder Layer Supervised:", self.student_layer_to_match, "match to", self.to_teacher_layer)
         else: 
@@ -253,6 +273,7 @@ class SummarizationDistiller(SummarizationModule):
         logs["src_pad_frac"] = batch["input_ids"].eq(self.pad).float().mean()
         # TODO(SS): make a wandb summary metric for this
         progress_bar = {k: v for k, v in logs.items() if k != "loss"}
+        self.csvlogger.log([(k, v) for k, v in logs.items()])
         return {"loss": loss_tensors[0], "log": logs, "progress_bar": progress_bar}
 
     # @staticmethod
@@ -262,7 +283,21 @@ class SummarizationDistiller(SummarizationModule):
         assert not isinstance(hidden_states, torch.Tensor), f"{msg}{hidden_states.shape}"
         assert not isinstance(hidden_states_T, torch.Tensor), f"{msg}{hidden_states_T.shape}"
 
-        if self.student_layer_to_match is not None and self.to_teacher_layer is not None:
+        if self.match_all_layers and self.to_teacher_layer is not None:
+            mask = attention_mask.to(hidden_states[0])
+            valid_count = mask.sum() * hidden_states[0].size(-1)
+            student_states = torch.stack([hidden_states[i] for i in range(len(hidden_states))])
+            teacher_states = torch.stack([hidden_states_T[self.to_teacher_layer] for _ in range(len(hidden_states))])
+            assert student_states.shape == teacher_states.shape, f"{student_states.shape} != {teacher_states.shape}"
+            if normalize_hidden:
+                student_states = F.layer_norm(student_states, student_states.shape[1:])
+                teacher_states = F.layer_norm(teacher_states, teacher_states.shape[1:])
+            mse = F.mse_loss(student_states, teacher_states, reduction="none")
+            masked_mse = (mse * mask.unsqueeze(0).unsqueeze(-1)).sum() / valid_count
+            return masked_mse
+
+        elif self.student_layer_to_match is not None and self.to_teacher_layer is not None:
+
             student_state = hidden_states[self.student_layer_to_match] 
             teacher_state = hidden_states_T[self.to_teacher_layer]
             if normalize_hidden:
@@ -316,6 +351,7 @@ def add_distill_args(parser):
     parser.add_argument("--reverse_encoder", action="store_true", default=False)
     parser.add_argument("--reverse_decoder", action="store_true", default=False)
     parser.add_argument("--copy_same_order", action="store_true", default=False, help="whether to copy the layers in same order as matching, or maintain consecutive order copying")
+    parser.add_argument("--match_all_layers", action="store_true", default=False, help="match all layers of student (must specify the --to clause)")
     parser.add_argument("--match_layers", type=int, default=None, help="student layer to match")
     parser.add_argument("--to", type=int, default=None, help="match student layer from argument '--match_layers' to teacher layer specified")
     parser.add_argument("--no_encoder_matching", action="store_true", default=False, help="disables encoder matching.")
@@ -374,9 +410,9 @@ if __name__ == "__main__":
     parser = SummarizationDistiller.add_model_specific_args(parser, os.getcwd())
     args = parser.parse_args()
     
-    if args.match_layers is None and args.to is not None:
-        raise ValueError("if match_layers is none, then to should also be none")
-    if args.match_layers is not None and args.to is None: 
+    if (args.match_layers is None and not args.match_all_layers) and args.to is not None:
+        raise ValueError("if match_layers is none and match_all_layers is false, then to should also be none")
+    if (args.match_layers is not None or args.match_all_layers) and args.to is None: 
         raise ValueError("if match layers is defined, to should also be defined")
 
 
