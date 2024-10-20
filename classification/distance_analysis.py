@@ -47,7 +47,17 @@ from transformers import (
 from transformers.trainer_utils import get_last_checkpoint, is_main_process
 from transformers.data.data_collator import DataCollator, DataCollatorWithPadding, default_data_collator
 from glue_metrics import Glue
-from dist_utils import MeanLayerDistance, MeanPairwiseLayerTransformDist, MeanPairwiseLayerTransformCosine, MeanNormedPairwiseCosine, MeanNormedCosine, MeanPairwiseCosine, StructuredCosine, StructuredCosineHistogram
+from dist_utils import (
+    MeanLayerDistance, 
+    MeanPairwiseLayerTransformDist, 
+    MeanPairwiseLayerTransformCosine, 
+    MeanNormedPairwiseCosine, 
+    MeanNormedCosine, 
+    MeanPairwiseCosine, 
+    StructuredCosine, 
+    StructuredCosineHistogram, 
+    CosineFromStudent
+    )
 
 
 task_to_keys = {
@@ -88,7 +98,7 @@ class Writer(object):
 
 
 class MetricSuite: 
-    def __init__(self, savedir, config1, config2=None, center_hidden_states=False):
+    def __init__(self, savedir, config1, config2=None, center_hidden_states=False, from_student_layer=1):
         self.savedir = savedir 
         self.config1 = config1
         self.teacher_pairwise_dist = MeanPairwiseLayerTransformDist() 
@@ -105,6 +115,8 @@ class MetricSuite:
             self.teacher_student_mean_dist = MeanLayerDistance()
             self.teacher_student_mean_cosines = MeanNormedCosine(between_model=False)
             self.teacher_student_cosine_histogram = StructuredCosineHistogram()
+
+            self.cosine_from_student = CosineFromStudent(from_student_layer=from_student_layer)
 
             self.student_pairwise_dist = MeanPairwiseLayerTransformDist() 
             # self.student_pairwise_cosines = MeanNormedPairwiseCosine() if center_hidden_states else MeanPairwiseCosine()
@@ -130,6 +142,8 @@ class MetricSuite:
             self.teacher_student_mean_dist(self.teacher_student_pairwise_dist.get_val()).accum()
             self.teacher_student_mean_cosines(self.teacher_student_pairwise_cosines.get_val()).accum()
             self.teacher_student_cosine_histogram(self.teacher_student_pairwise_cosines.get_val()).accum()
+
+            self.cosine_from_student(hidden_t_stacked, hidden_s_stacked).accum()
 
             self.student_pairwise_dist(hidden_s_stacked, hidden_s_stacked).accum()
             # self.student_pairwise_cosines(hidden_s_stacked, hidden_s_stacked).accum()
@@ -188,12 +202,15 @@ class MetricSuite:
 
 
             teacher_student_cosine_hist = self.teacher_student_cosine_histogram.get_mean().detach().cpu() 
-            print(teacher_student_cosine_hist)
             plt.hist(teacher_student_cosine_hist, bins=40, range=(-1., 1.))
-            plt.savefig(os.path.join(self.savedir, "cosines_hist"))
+            plt.savefig(os.path.join(self.savedir, "transform_sim_hist"))
             plt.close() 
 
 
+            cosines_from_student = self.cosine_from_student.get_mean()
+            plt.hist(cosines_from_student, bins=1000, range=(-1., 1.))
+            plt.savefig(os.path.join(self.savedir, "student_directions_hist"))
+            plt.close() 
 
 
 
@@ -223,7 +240,11 @@ class MetricSuite:
             # plt.close()
 
 
-
+            # Saving histogram to text file 
+            hist, bins = np.histogram(cosines_from_student, bins=1000, range=(-1., 1.))
+            print(hist.shape, bins.shape)
+            data = np.stack([bins[:hist.shape[0]], hist], axis=-1)
+            np.savetxt(os.path.join(self.savedir, "student_directions_hist.txt"), data, delimiter=',')
 
             with open(os.path.join(self.savedir, "between-model-pairwise-dist.csv"), "w") as f:
                 # indices
@@ -359,6 +380,10 @@ class ModelArguments:
         metadata={
             "help": "centers hidden states for cosine similarity measurement"
         },
+    )
+    from_student_layer: Optional[int] = field(
+        default=1, 
+        metadata={"help": "from which student layer to anchor cosine similarity observations"}
     )
 
 

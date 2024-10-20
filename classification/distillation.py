@@ -212,6 +212,10 @@ class DistillationArguments(TrainingArguments):
         default=False, 
         metadata={"help": "randomly initialize the student"}
     )
+    random_matching: Optional[bool] = field(
+        default=False, 
+        metadata = {"help": "randomly match student to teacher layers"}
+    )
 
 
 def main():

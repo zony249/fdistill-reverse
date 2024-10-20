@@ -1870,6 +1870,7 @@ class DistillBertTrainer(Trainer):
         self.alpha_hidden = self.args.alpha_hidden 
 
         self.reverse = self.args.reverse
+        self.random = self.args.random_matching
         self.compute_hidden_loss: bool = self.alpha_hidden > 0
         self.compute_kl_loss: bool = self.alpha_kl > 0
         self.compute_mle_loss: bool = self.alpha_mle > 0
@@ -1895,6 +1896,7 @@ class DistillBertTrainer(Trainer):
             self.match_to = None
             self.match_all_layers = False
             print(f"reverse: {self.reverse}")
+            print(f"random: {self.random}")
             print(f"layer_matching: {self.layer_matching}")
         print(f"metric_for_best_model: {self.args.metric_for_best_model}")
 
@@ -1926,6 +1928,7 @@ class DistillBertTrainer(Trainer):
                             student_hidden: Tuple[torch.Tensor], 
                             layers_matched: List[int], 
                             match_embeddings: bool = True) -> Tuple[List[torch.Tensor]]: 
+        print("layer_matching", layers_matched)
         if match_embeddings: 
             t_hidden = [teacher_hidden[0]] + [teacher_hidden[i+1] for i in layers_matched]
             s_hidden = [student_hidden[0]] + [student_hidden[i+1] for i in range(len(layers_matched))]
@@ -2086,18 +2089,16 @@ class DistillBertTrainer(Trainer):
 
         if self.compute_hidden_loss: 
             if self.match_all_layers and self.match_to is not None: 
-                print('match all layers')
                 student_hidden = student_outputs.hidden_states
                 teacher_hidden = [teacher_outputs.hidden_states[self.match_to] for _ in range(len(student_hidden))]
             elif self.match_one_layer is not None and self.match_to is not None: 
-                print('match one layer')
                 student_hidden = [student_outputs.hidden_states[self.match_one_layer]]
                 teacher_hidden = [teacher_outputs.hidden_states[self.match_to]]
             else:
                 teacher_hidden, student_hidden = self.get_matching_states(
                         teacher_hidden=teacher_outputs.hidden_states, 
                         student_hidden=student_outputs.hidden_states,
-                        layers_matched=self.layer_matching, 
+                        layers_matched=self.layer_matching if not self.random else np.random.permutation(self.layer_matching), 
                         match_embeddings=True)
             
             hidden_loss = self._hidden_loss(teacher_states=teacher_hidden, 

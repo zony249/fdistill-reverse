@@ -277,6 +277,9 @@ class StructuredCosine(Measure):
         super().__init__() 
     def compute(self, hidden_t, hidden_s):
         """
+        cosine of each corresponding transformation of student and teacher. 
+        Deeper teachers will have many of their hidden states ignored
+
         hidden_t: torch.Tensor[batch, layers_t, seq_len, hidden]
         hidden_s: torch.Tensor[batch, layers_s, seq_len, hidden]
         produces: torch.Tensor[layers_s, layers_s]
@@ -319,6 +322,49 @@ class StructuredCosineHistogram(Measure):
         self.val = elems
         # print(self.val)
         return self
+
+class CosineFromStudent(Measure): 
+    def __init__(self, from_student_layer): 
+        self.from_student_layer = from_student_layer
+        super().__init__() 
+    def compute(self, hidden_t, hidden_s): 
+        """
+        cos(T1-S1, Tk-S1)
+        hidden_t: torch.Tensor[batch, layers_t, seq_len, hidden]
+        hidden_s: torch.Tensor[batch, layers_s, seq_len, hidden]
+        """
+
+        layers_t = hidden_t.shape[1]
+        layers_s = hidden_s.shape[1]
+        seq_len = min(hidden_t.shape[2], hidden_s.shape[2]) 
+        dim = hidden_t.shape[-1]
+
+        assert hidden_s.shape[-1] == dim 
+        hidden_t_trunc = hidden_t[:, :, :seq_len]
+        hidden_s_trunc = hidden_s[:, :, :seq_len]
+
+        cos_sims = []
+        ht1 = hidden_t_trunc[:, 1].reshape(-1, dim)
+        for i in range(layers_t): 
+            htk = hidden_t_trunc[:, i].reshape(-1, dim)
+            hs1 = hidden_s_trunc[:, self.from_student_layer].reshape(-1, dim)
+
+            u = ht1 - hs1
+            v = htk - hs1
+            uv = (u * v).sum(dim=-1)
+            uu = u.norm(dim=-1) 
+            vv = v.norm(dim=-1)
+            cosine = (uv / (uu * vv + 1e-6))
+            cos_sims = cosine.tolist()  
+            print(cosine)
+        self.val = cos_sims 
+        return self
+    def accum(self): 
+        if self.counter == 0: 
+            self.mean = self.val 
+        else: 
+            self.mean += self.val
+        self.counter += 1
 
 
 
