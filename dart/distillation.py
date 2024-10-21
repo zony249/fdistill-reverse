@@ -6,6 +6,7 @@ import os
 import sys
 from pathlib import Path
 from typing import List, Dict
+import random
 
 import pytorch_lightning as pl
 import torch
@@ -144,6 +145,9 @@ class SummarizationDistiller(SummarizationModule):
         self.alpha_mlm = hparams.alpha_mlm
         self.alpha_ce = hparams.alpha_ce
         self.alpha_hid = hparams.alpha_hid
+
+        self.random_matching = hparams.random_matching
+
         gc.collect()
         torch.cuda.empty_cache()
 
@@ -311,7 +315,10 @@ class SummarizationDistiller(SummarizationModule):
 
         else:
             # add embedding layer
-            matches = [0] + [i + 1 for i in matches]
+            layer_matching = [i + 1 for i in matches]
+            if self.random_matching: 
+                random.shuffle(layer_matching)
+            matches = [0] + layer_matching 
 
             mask = attention_mask.to(hidden_states[0])
             valid_count = mask.sum() * hidden_states[0].size(-1)
@@ -357,6 +364,8 @@ def add_distill_args(parser):
     parser.add_argument("--no_encoder_matching", action="store_true", default=False, help="disables encoder matching.")
     parser.add_argument("--no_decoder_matching", action="store_true", default=False, help="disables decoder matching.")
     parser.add_argument("--random_init_student", action="store_true", default=False, help="randomly initializes student")
+    parser.add_argument("--random_matching", action="store_true", default=False, help="randomly matches layers")
+
 
 
 class TranslationDistiller(SummarizationDistiller):
@@ -410,9 +419,9 @@ if __name__ == "__main__":
     parser = SummarizationDistiller.add_model_specific_args(parser, os.getcwd())
     args = parser.parse_args()
     
-    if (args.match_layers is None and not args.match_all_layers) and args.to is not None:
-        raise ValueError("if match_layers is none and match_all_layers is false, then to should also be none")
-    if (args.match_layers is not None or args.match_all_layers) and args.to is None: 
+    if args.match_layers is None and args.to is not None:
+        raise ValueError("if match_layers is none, then to should also be none")
+    if args.match_layers is not None and args.to is None: 
         raise ValueError("if match layers is defined, to should also be defined")
 
 
