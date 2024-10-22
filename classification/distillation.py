@@ -216,6 +216,10 @@ class DistillationArguments(TrainingArguments):
         default=False, 
         metadata = {"help": "randomly match student to teacher layers"}
     )
+    copy_same_order: Optional[bool] = field(
+        default=False, 
+        metadata={"help": "copy layers the same order as matching"}
+    )
 
 
 def main():

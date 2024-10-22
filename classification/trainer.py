@@ -1859,28 +1859,36 @@ class DistillBertTrainer(Trainer):
 
         self.teacher = teacher.to(kwargs["args"].device)
         self.num_student_layers = kwargs["args"].num_student_layers
-        model = self.init_student_from_teacher(teacher=self.teacher, layers_to_copy=LAYER_MAP[self.num_student_layers], random_init = kwargs["args"].random_init_student)
-        
-        kwargs["model"] = model
+        self.reverse = kwargs["args"].reverse 
+        self.copy_same_order = kwargs["args"].copy_same_order 
 
-        super().__init__(*pargs, **kwargs) 
+        self.alpha_mle = kwargs["args"].alpha_mle 
+        self.alpha_kl = kwargs["args"].alpha_kl
+        self.alpha_hidden = kwargs["args"].alpha_hidden 
 
-        self.alpha_mle = self.args.alpha_mle 
-        self.alpha_kl = self.args.alpha_kl
-        self.alpha_hidden = self.args.alpha_hidden 
-
-        self.reverse = self.args.reverse
-        self.random = self.args.random_matching
+        self.reverse = kwargs["args"].reverse
+        self.random = kwargs["args"].random_matching
         self.compute_hidden_loss: bool = self.alpha_hidden > 0
         self.compute_kl_loss: bool = self.alpha_kl > 0
         self.compute_mle_loss: bool = self.alpha_mle > 0
 
+
         self.layer_matching = None
         if self.compute_hidden_loss:
             self.layer_matching = LAYER_MAP[self.num_student_layers] 
+            if self.reverse: 
+                self.layer_matching = self.layer_matching[::-1]
+            if self.random: 
+                self.layer_matching = np.random.permutation(self.layer_matching)
+
+
+        layers_to_copy = self.get_layer_copy_order(self.layer_matching, self.copy_same_order)
+
+        model = self.init_student_from_teacher(teacher=self.teacher, layers_to_copy=layers_to_copy, random_init = kwargs["args"].random_init_student)
         
-        if self.reverse: 
-            self.layer_matching = self.layer_matching[::-1]
+        kwargs["model"] = model
+
+        super().__init__(*pargs, **kwargs) 
 
 
         print("======= STUDENT ARCHITECTURE ========")
@@ -1899,7 +1907,14 @@ class DistillBertTrainer(Trainer):
             print(f"random: {self.random}")
             print(f"layer_matching: {self.layer_matching}")
         print(f"metric_for_best_model: {self.args.metric_for_best_model}")
+        print("======= COPYING =========") 
+        print(None) if self.args.random_init_student else print(f"Copy order: {layers_to_copy}")
 
+    def get_layer_copy_order(self, layers_to_copy, copy_same_order): 
+        if copy_same_order: 
+            return layers_to_copy
+        sorted_order = deepcopy(layers_to_copy)
+        return sorted(sorted_order)
 
     def init_student_from_teacher(self, teacher: PreTrainedModel, layers_to_copy: List[int], random_init = None) -> PreTrainedModel: 
         
@@ -2098,7 +2113,7 @@ class DistillBertTrainer(Trainer):
                 teacher_hidden, student_hidden = self.get_matching_states(
                         teacher_hidden=teacher_outputs.hidden_states, 
                         student_hidden=student_outputs.hidden_states,
-                        layers_matched=self.layer_matching if not self.random else np.random.permutation(self.layer_matching), 
+                        layers_matched=self.layer_matching, 
                         match_embeddings=True)
             
             hidden_loss = self._hidden_loss(teacher_states=teacher_hidden, 
