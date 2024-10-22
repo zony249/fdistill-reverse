@@ -64,7 +64,7 @@ class SummarizationDistiller(SummarizationModule):
         else:
             student, e_layer_ids, d_layer_ids = create_student_by_copying_alternating_layers(
                 teacher, e=hparams.student_encoder_layers, d=hparams.student_decoder_layers, save_path=save_dir, 
-                reverse_encoder=hparams.reverse_encoder, reverse_decoder=hparams.reverse_decoder, copy_same_order=hparams.copy_same_order, random_init=hparams.random_init_student
+                reverse_encoder=hparams.reverse_encoder, reverse_decoder=hparams.reverse_decoder, reverse_weights=hparams.reverse_weights, random_init=hparams.random_init_student
             )
 
         if hparams.length_penalty != -1:
@@ -357,7 +357,7 @@ def add_distill_args(parser):
     parser.add_argument("--temperature", type=float, default=1.)
     parser.add_argument("--reverse_encoder", action="store_true", default=False)
     parser.add_argument("--reverse_decoder", action="store_true", default=False)
-    parser.add_argument("--copy_same_order", action="store_true", default=False, help="whether to copy the layers in same order as matching, or maintain consecutive order copying")
+    parser.add_argument("--reverse_weights", action="store_true", default=False, help="whether to copy the layers in same order as matching, or maintain consecutive order copying")
     parser.add_argument("--match_all_layers", action="store_true", default=False, help="match all layers of student (must specify the --to clause)")
     parser.add_argument("--match_layers", type=int, default=None, help="student layer to match")
     parser.add_argument("--to", type=int, default=None, help="match student layer from argument '--match_layers' to teacher layer specified")

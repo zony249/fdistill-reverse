@@ -90,7 +90,7 @@ def create_student_by_copying_alternating_layers(
     d_layers_to_copy=None,
     reverse_encoder=False, 
     reverse_decoder=False, 
-    copy_same_order=False, 
+    reverse_weights=False, 
     random_init=False, 
     **extra_config_kwargs
 ) -> Tuple[PreTrainedModel, List[int], List[int]]:
@@ -158,35 +158,35 @@ def create_student_by_copying_alternating_layers(
     if d_layers_to_copy is None:
         d_layers_to_copy: List[int] = pick_layers_to_copy(d, teacher_d)
 
-    if reverse_encoder:
-        e_layers_to_copy = e_layers_to_copy[::-1]
-    if reverse_decoder:
-        d_layers_to_copy = d_layers_to_copy[::-1]
+    # if reverse_encoder:
+    #     e_layers_to_copy = e_layers_to_copy[::-1]
+    # if reverse_decoder:
+    #     d_layers_to_copy = d_layers_to_copy[::-1]
 
     try:
         if not random_init:
-            if copy_same_order:
+            if reverse_weights:
+                print("Copying encoder layers...")
+                student.model.encoder.layers = copy_layers(teacher.model.encoder.layers, student.model.encoder.layers, e_layers_to_copy[::-1])
+                print("Copying decoder layers...")
+                student.model.decoder.layers = copy_layers(teacher.model.decoder.layers, student.model.decoder.layers, d_layers_to_copy[::-1])
+            else: 
                 print("Copying encoder layers...")
                 student.model.encoder.layers = copy_layers(teacher.model.encoder.layers, student.model.encoder.layers, e_layers_to_copy)
                 print("Copying decoder layers...")
                 student.model.decoder.layers = copy_layers(teacher.model.decoder.layers, student.model.decoder.layers, d_layers_to_copy)
-            else: 
-                print("Copying encoder layers...")
-                student.model.encoder.layers = copy_layers(teacher.model.encoder.layers, student.model.encoder.layers, sorted(e_layers_to_copy))
-                print("Copying decoder layers...")
-                student.model.decoder.layers = copy_layers(teacher.model.decoder.layers, student.model.decoder.layers, sorted(d_layers_to_copy))
     except AttributeError:  # For t5, student.model.encoder.layers is called student.encoder.block
         if not random_init:
-            if copy_same_order:
+            if reverse_weights:
+                print("Copying encoder layers...")
+                student.encoder.block = copy_layers(teacher.encoder.block, student.encoder.block, e_layers_to_copy[::-1])
+                print("Copying decoder layers...")
+                student.decoder.block = copy_layers(teacher.decoder.block, student.decoder.block, d_layers_to_copy[::-1])
+            else: 
                 print("Copying encoder layers...")
                 student.encoder.block = copy_layers(teacher.encoder.block, student.encoder.block, e_layers_to_copy)
                 print("Copying decoder layers...")
                 student.decoder.block = copy_layers(teacher.decoder.block, student.decoder.block, d_layers_to_copy)
-            else: 
-                print("Copying encoder layers...")
-                student.encoder.block = copy_layers(teacher.encoder.block, student.encoder.block, sorted(e_layers_to_copy))
-                print("Copying decoder layers...")
-                student.decoder.block = copy_layers(teacher.decoder.block, student.decoder.block, sorted(d_layers_to_copy))
     
     if random_init: 
         student = AutoModelForSeq2SeqLM.from_config(student_cfg)
