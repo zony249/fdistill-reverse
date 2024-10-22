@@ -5,6 +5,7 @@ from copy import deepcopy
 
 import fire
 from torch import nn
+import numpy as np
 
 from transformers import AutoModelForSeq2SeqLM, AutoTokenizer, PreTrainedModel
 from transformers.utils import logging
@@ -92,6 +93,7 @@ def create_student_by_copying_alternating_layers(
     reverse_decoder=False, 
     reverse_weights=False, 
     random_init=False, 
+    random_matching=False, 
     **extra_config_kwargs
 ) -> Tuple[PreTrainedModel, List[int], List[int]]:
     """Make a student by copying alternating layers from a teacher, save it to save_path.
@@ -212,6 +214,10 @@ def create_student_by_copying_alternating_layers(
     # Save information about copying for easier reproducibility
     e_layers_supervised = LAYERS_TO_SUPERVISE[teacher_e][e]  
     d_layers_supervised = LAYERS_TO_SUPERVISE[teacher_d][d]  
+
+    if random_matching: 
+        e_layers_supervised = np.random.permutation(e_layers_supervised)
+        d_layers_supervised = np.random.permutation(d_layers_supervised)
 
     if reverse_encoder: 
         e_layers_supervised = e_layers_supervised[::-1]

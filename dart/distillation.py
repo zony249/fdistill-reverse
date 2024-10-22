@@ -55,6 +55,7 @@ class SummarizationDistiller(SummarizationModule):
 
         hparams.model_name_or_path = str(save_dir)  # Tell lightning we are training the student
         teacher = AutoModelForSeq2SeqLM.from_pretrained(hparams.teacher).eval()
+        
 
         use_task_specific_params(teacher, hparams.task)  # We copy good generation parameters to student by default
         if hparams.student is not None:
@@ -64,7 +65,8 @@ class SummarizationDistiller(SummarizationModule):
         else:
             student, e_layer_ids, d_layer_ids = create_student_by_copying_alternating_layers(
                 teacher, e=hparams.student_encoder_layers, d=hparams.student_decoder_layers, save_path=save_dir, 
-                reverse_encoder=hparams.reverse_encoder, reverse_decoder=hparams.reverse_decoder, reverse_weights=hparams.reverse_weights, random_init=hparams.random_init_student
+                reverse_encoder=hparams.reverse_encoder, reverse_decoder=hparams.reverse_decoder, reverse_weights=hparams.reverse_weights, random_init=hparams.random_init_student, 
+                random_matching = hparams.random_matching, 
             )
 
         if hparams.length_penalty != -1:
@@ -98,6 +100,8 @@ class SummarizationDistiller(SummarizationModule):
                 del self.teacher.model.encoder
             except AttributeError:  # T5
                 del self.teacher.encoder
+
+        self.random_matching = hparams.random_matching
 
         if e_layer_ids is None:
             e_layer_ids = list(range(student_encoder_layers))
@@ -146,7 +150,7 @@ class SummarizationDistiller(SummarizationModule):
         self.alpha_ce = hparams.alpha_ce
         self.alpha_hid = hparams.alpha_hid
 
-        self.random_matching = hparams.random_matching
+        
 
         gc.collect()
         torch.cuda.empty_cache()
@@ -316,9 +320,8 @@ class SummarizationDistiller(SummarizationModule):
         else:
             # add embedding layer
             layer_matching = [i + 1 for i in matches]
-            if self.random_matching: 
-                random.shuffle(layer_matching)
             matches = [0] + layer_matching 
+
 
             mask = attention_mask.to(hidden_states[0])
             valid_count = mask.sum() * hidden_states[0].size(-1)
@@ -419,9 +422,9 @@ if __name__ == "__main__":
     parser = SummarizationDistiller.add_model_specific_args(parser, os.getcwd())
     args = parser.parse_args()
     
-    if args.match_layers is None and args.to is not None:
+    if (args.match_layers is None and not args.match_all_layers) and args.to is not None:
         raise ValueError("if match_layers is none, then to should also be none")
-    if args.match_layers is not None and args.to is None: 
+    if (args.match_layers is not None or args.match_all_layers) and args.to is None: 
         raise ValueError("if match layers is defined, to should also be defined")
 
 
