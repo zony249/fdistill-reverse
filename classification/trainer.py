@@ -1860,7 +1860,7 @@ class DistillBertTrainer(Trainer):
         self.teacher = teacher.to(kwargs["args"].device)
         self.num_student_layers = kwargs["args"].num_student_layers
         self.reverse = kwargs["args"].reverse 
-        self.copy_same_order = kwargs["args"].copy_same_order 
+        self.reverse_weights = kwargs["args"].reverse_weights 
 
         self.alpha_mle = kwargs["args"].alpha_mle 
         self.alpha_kl = kwargs["args"].alpha_kl
@@ -1882,7 +1882,7 @@ class DistillBertTrainer(Trainer):
                 self.layer_matching = np.random.permutation(self.layer_matching)
 
 
-        layers_to_copy = self.get_layer_copy_order(self.layer_matching, self.copy_same_order)
+        layers_to_copy = self.get_layer_copy_order(self.reverse_weights)
 
         model = self.init_student_from_teacher(teacher=self.teacher, layers_to_copy=layers_to_copy, random_init = kwargs["args"].random_init_student)
         
@@ -1910,11 +1910,11 @@ class DistillBertTrainer(Trainer):
         print("======= COPYING =========") 
         print(None) if self.args.random_init_student else print(f"Copy order: {layers_to_copy}")
 
-    def get_layer_copy_order(self, layers_to_copy, copy_same_order): 
-        if copy_same_order: 
-            return layers_to_copy
-        sorted_order = deepcopy(layers_to_copy)
-        return sorted(sorted_order)
+    def get_layer_copy_order(self, reverse_weights): 
+        layers_to_match = LAYER_MAP[self.num_student_layers] 
+        if reverse_weights: 
+            return layers_to_match[::-1]
+        return layers_to_match
 
     def init_student_from_teacher(self, teacher: PreTrainedModel, layers_to_copy: List[int], random_init = None) -> PreTrainedModel: 
         
