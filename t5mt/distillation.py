@@ -6,6 +6,7 @@ import os
 import sys
 from pathlib import Path
 from typing import List, Dict
+import random
 
 import pytorch_lightning as pl
 import torch
@@ -55,6 +56,7 @@ class SummarizationDistiller(TranslationModule):
         hparams.model_name_or_path = str(save_dir)  # Tell lightning we are training the student
         teacher = AutoModelForSeq2SeqLM.from_pretrained(hparams.teacher).eval()
 
+
         use_task_specific_params(teacher, "translation_en_to_ro")  # We copy good generation parameters to student by default
         if hparams.student is not None:
             student = AutoModelForSeq2SeqLM.from_pretrained(hparams.student)
@@ -63,7 +65,8 @@ class SummarizationDistiller(TranslationModule):
         else:
             student, e_layer_ids, d_layer_ids = create_student_by_copying_alternating_layers(
                 teacher, e=hparams.student_encoder_layers, d=hparams.student_decoder_layers, save_path=save_dir, 
-                reverse_encoder=hparams.reverse_encoder, reverse_decoder=hparams.reverse_decoder, copy_same_order=hparams.copy_same_order, random_init=hparams.random_init_student
+                reverse_encoder=hparams.reverse_encoder, reverse_decoder=hparams.reverse_decoder, reverse_weights=hparams.reverse_weights, random_init=hparams.random_init_student, 
+                random_matching = hparams.random_matching, 
             )
 
         if hparams.length_penalty != -1:
@@ -98,6 +101,8 @@ class SummarizationDistiller(TranslationModule):
             except AttributeError:  # T5
                 del self.teacher.encoder
 
+        self.random_matching = hparams.random_matching
+
         if e_layer_ids is None:
             e_layer_ids = list(range(student_encoder_layers))
         if d_layer_ids is None:
@@ -121,11 +126,15 @@ class SummarizationDistiller(TranslationModule):
             self.d_matches = None
         
         self.student_layer_to_match = hparams.match_layers 
+        self.match_all_layers = args.match_all_layers
         self.to_teacher_layer = hparams.to
         self.no_decoder_matching = hparams.no_decoder_matching
         self.no_encoder_matching = hparams.no_encoder_matching
-
-        if self.student_layer_to_match is not None and self.to_teacher_layer is not None: 
+        
+        if self.match_all_layers and self.to_teacher_layer is not None: 
+            print("Encoder Layer Supervised: all, match to", self.to_teacher_layer)
+            print("Decoder Layer Supervised: all, match to", self.to_teacher_layer)
+        elif self.student_layer_to_match is not None and self.to_teacher_layer is not None: 
             print("Encoder Layer Supervised:", self.student_layer_to_match, "match to", self.to_teacher_layer)
             print("Decoder Layer Supervised:", self.student_layer_to_match, "match to", self.to_teacher_layer)
         else: 
@@ -140,6 +149,9 @@ class SummarizationDistiller(TranslationModule):
         self.alpha_mlm = hparams.alpha_mlm
         self.alpha_ce = hparams.alpha_ce
         self.alpha_hid = hparams.alpha_hid
+
+        
+
         gc.collect()
         torch.cuda.empty_cache()
 
@@ -280,7 +292,21 @@ class SummarizationDistiller(TranslationModule):
         assert not isinstance(hidden_states, torch.Tensor), f"{msg}{hidden_states.shape}"
         assert not isinstance(hidden_states_T, torch.Tensor), f"{msg}{hidden_states_T.shape}"
 
-        if self.student_layer_to_match is not None and self.to_teacher_layer is not None:
+        if self.match_all_layers and self.to_teacher_layer is not None:
+            mask = attention_mask.to(hidden_states[0])
+            valid_count = mask.sum() * hidden_states[0].size(-1)
+            student_states = torch.stack([hidden_states[i] for i in range(len(hidden_states))])
+            teacher_states = torch.stack([hidden_states_T[self.to_teacher_layer] for _ in range(len(hidden_states))])
+            assert student_states.shape == teacher_states.shape, f"{student_states.shape} != {teacher_states.shape}"
+            if normalize_hidden:
+                student_states = F.layer_norm(student_states, student_states.shape[1:])
+                teacher_states = F.layer_norm(teacher_states, teacher_states.shape[1:])
+            mse = F.mse_loss(student_states, teacher_states, reduction="none")
+            masked_mse = (mse * mask.unsqueeze(0).unsqueeze(-1)).sum() / valid_count
+            return masked_mse
+
+        elif self.student_layer_to_match is not None and self.to_teacher_layer is not None:
+
             student_state = hidden_states[self.student_layer_to_match] 
             teacher_state = hidden_states_T[self.to_teacher_layer]
             if normalize_hidden:
@@ -294,7 +320,9 @@ class SummarizationDistiller(TranslationModule):
 
         else:
             # add embedding layer
-            matches = [0] + [i + 1 for i in matches]
+            layer_matching = [i + 1 for i in matches]
+            matches = [0] + layer_matching 
+
 
             mask = attention_mask.to(hidden_states[0])
             valid_count = mask.sum() * hidden_states[0].size(-1)
@@ -333,12 +361,15 @@ def add_distill_args(parser):
     parser.add_argument("--temperature", default=1., type=float)
     parser.add_argument("--reverse_encoder", action="store_true", default=False)
     parser.add_argument("--reverse_decoder", action="store_true", default=False)
-    parser.add_argument("--copy_same_order", action="store_true", default=False, help="whether to copy the layers in same order as matching, or maintain consecutive order copying")
+    parser.add_argument("--reverse_weights", action="store_true", default=False, help="whether to copy the layers in same order as matching, or maintain consecutive order copying")
+    parser.add_argument("--match_all_layers", action="store_true", default=False, help="match all layers of student (must specify the --to clause)")
     parser.add_argument("--match_layers", type=int, default=None, help="student layer to match")
     parser.add_argument("--to", type=int, default=None, help="match student layer from argument '--match_layers' to teacher layer specified")
     parser.add_argument("--no_encoder_matching", action="store_true", default=False, help="disables encoder matching.")
     parser.add_argument("--no_decoder_matching", action="store_true", default=False, help="disables decoder matching.")
     parser.add_argument("--random_init_student", action="store_true", default=False, help="randomly initializes student")
+    parser.add_argument("--random_matching", action="store_true", default=False, help="randomly matches layers")
+
 
 
 class TranslationDistiller(SummarizationDistiller):
@@ -393,9 +424,9 @@ if __name__ == "__main__":
     parser = TranslationDistiller.add_model_specific_args(parser, os.getcwd())
     args = parser.parse_args()
     
-    if args.match_layers is None and args.to is not None:
+    if (args.match_layers is None and not args.match_all_layers) and args.to is not None:
         raise ValueError("if match_layers is none, then to should also be none")
-    if args.match_layers is not None and args.to is None: 
+    if (args.match_layers is not None or args.match_all_layers) and args.to is None: 
         raise ValueError("if match layers is defined, to should also be defined")
 
 
