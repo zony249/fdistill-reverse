@@ -220,7 +220,10 @@ class DistillationArguments(TrainingArguments):
         default=False, 
         metadata={"help": "copy layers the same order as matching"}
     )
-
+    dim: Optional[int] = field (
+        default=None, 
+        metadata={"help": "dimensionality of student"}
+    )
 
 def main():
     # See all possible arguments in src/transformers/training_args.py

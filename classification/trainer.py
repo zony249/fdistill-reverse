@@ -1883,13 +1883,18 @@ class DistillBertTrainer(Trainer):
 
 
         layers_to_copy = self.get_layer_copy_order(self.reverse_weights)
+        self.dim = kwargs["args"].dim 
 
-        model = self.init_student_from_teacher(teacher=self.teacher, layers_to_copy=layers_to_copy, random_init = kwargs["args"].random_init_student)
+        model = self.init_student_from_teacher(teacher=self.teacher, layers_to_copy=layers_to_copy, random_init = kwargs["args"].random_init_student, dim=kwargs["args"].dim)
         
         kwargs["model"] = model
 
         super().__init__(*pargs, **kwargs) 
 
+        if self.dim is not None: 
+            self.random_init_student = True
+            self.model.adapters = [nn.Linear(self.dim, self.teacher.config.hidden_size, bias=False, device=self.args.device) for _ in range(self.model.config.num_hidden_layers + 1)]
+            # self.optimizer.add_param_group(optimizer_grouped_parameters)
 
         print("======= STUDENT ARCHITECTURE ========")
         print(self.model)
@@ -1904,7 +1909,7 @@ class DistillBertTrainer(Trainer):
             self.match_to = None
             self.match_all_layers = False
             print(f"reverse: {self.reverse}")
-            print(f"random: {self.random}")
+            print(f"random_matching: {self.random}")
             print(f"layer_matching: {self.layer_matching}")
         print(f"metric_for_best_model: {self.args.metric_for_best_model}")
         print("======= COPYING =========") 
@@ -1916,11 +1921,18 @@ class DistillBertTrainer(Trainer):
             return layers_to_match[::-1]
         return layers_to_match
 
-    def init_student_from_teacher(self, teacher: PreTrainedModel, layers_to_copy: List[int], random_init = None) -> PreTrainedModel: 
+    def init_student_from_teacher(self, 
+                                  teacher: PreTrainedModel, 
+                                  layers_to_copy: List[int], 
+                                  random_init = None, 
+                                  dim=None) -> PreTrainedModel: 
         
         student_config = deepcopy(teacher.config)
         if isinstance(student_config, BertConfig): 
             student_config.num_hidden_layers = self.num_student_layers
+            if dim is not None: 
+                student_config.hidden_size = dim
+                random_init=True
         else: 
             raise NotImplementedError()
     
@@ -2115,6 +2127,8 @@ class DistillBertTrainer(Trainer):
                         student_hidden=student_outputs.hidden_states,
                         layers_matched=self.layer_matching, 
                         match_embeddings=True)
+            if self.dim is not None: 
+                student_hidden = [a(x) for a, x in zip(self.model.adapters, student_hidden)]
             
             hidden_loss = self._hidden_loss(teacher_states=teacher_hidden, 
                               student_states=student_hidden, 
