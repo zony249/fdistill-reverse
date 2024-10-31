@@ -66,8 +66,11 @@ class SummarizationDistiller(SummarizationModule):
             student, e_layer_ids, d_layer_ids = create_student_by_copying_alternating_layers(
                 teacher, e=hparams.student_encoder_layers, d=hparams.student_decoder_layers, save_path=save_dir, 
                 reverse_encoder=hparams.reverse_encoder, reverse_decoder=hparams.reverse_decoder, reverse_weights=hparams.reverse_weights, random_init=hparams.random_init_student, 
-                random_matching = hparams.random_matching, 
+                random_matching = hparams.random_matching, dim=hparams.dim 
             )
+            if hparams.dim is not None: 
+                student.e_adapters = nn.ModuleList([nn.Linear(hparams.dim, teacher.config.d_model, bias=False) for i in range(hparams.student_encoder_layers + 1)])
+                student.d_adapters = nn.ModuleList([nn.Linear(hparams.dim, teacher.config.d_model, bias=False) for i in range(hparams.student_decoder_layers + 1)])
 
         if hparams.length_penalty != -1:
             student.config.length_penalty = hparams.length_penalty
@@ -230,6 +233,8 @@ class SummarizationDistiller(SummarizationModule):
             if self.different_base_models:
                 teacher_enc_outputs = all_teacher_encoder_outputs["last_hidden_state"]
             elif self.do_calc_hidden_loss:
+                if self.hparams.dim is not None: 
+                    student_outputs["encoder_hidden_states"] = [a(x) for a, x in zip(self.model.e_adapters, student_outputs["encoder_hidden_states"])]
                 hid_loss_enc = self.calc_hidden_loss(
                     src_mask,
                     student_outputs["encoder_hidden_states"],
@@ -241,7 +246,7 @@ class SummarizationDistiller(SummarizationModule):
         teacher_outputs = self.teacher(
             input_ids,
             attention_mask=src_mask,
-            encoder_outputs=(teacher_enc_outputs,),
+            encoder_outputs=(all_teacher_encoder_outputs["last_hidden_state"],),
             decoder_input_ids=decoder_input_ids,
             output_hidden_states=self.do_calc_hidden_loss,
             use_cache=False,  # since we are not passing labels, never let this default to True
@@ -249,6 +254,8 @@ class SummarizationDistiller(SummarizationModule):
         dec_mask = decoder_input_ids.ne(pad_token_id)
         loss_ce = self.calc_ce_loss(dec_mask, lm_logits, teacher_outputs["logits"])
         if self.do_calc_hidden_loss:  # Intermediate supervision of decoder hidden states
+            if self.hparams.dim is not None: 
+                student_outputs["decoder_hidden_states"] = [a(x) for a, x in zip(self.model.d_adapters, student_outputs["decoder_hidden_states"])]
             hid_loss_dec = self.calc_hidden_loss(
                 dec_mask,
                 student_outputs["decoder_hidden_states"],
@@ -368,6 +375,7 @@ def add_distill_args(parser):
     parser.add_argument("--no_decoder_matching", action="store_true", default=False, help="disables decoder matching.")
     parser.add_argument("--random_init_student", action="store_true", default=False, help="randomly initializes student")
     parser.add_argument("--random_matching", action="store_true", default=False, help="randomly matches layers")
+    parser.add_argument("--dim", type=int, default=None, help="hidden layer dimension for student")
 
 
 
@@ -411,6 +419,7 @@ def create_module(args):
 def distill_main(args):
     Path(args.output_dir).mkdir(exist_ok=True)
     check_output_dir(args, expected_items=3)
+
 
     model = create_module(args)
     return ft_main(args, model=model)

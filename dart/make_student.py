@@ -94,6 +94,7 @@ def create_student_by_copying_alternating_layers(
     reverse_weights=False, 
     random_init=False, 
     random_matching=False, 
+    dim=None, 
     **extra_config_kwargs
 ) -> Tuple[PreTrainedModel, List[int], List[int]]:
     """Make a student by copying alternating layers from a teacher, save it to save_path.
@@ -128,6 +129,9 @@ def create_student_by_copying_alternating_layers(
         if d is None:
             d = teacher_d
         init_kwargs.update({"encoder_layers": e, "decoder_layers": d})
+        if dim is not None: 
+            random_init = True
+            init_kwargs.update({"d_model": dim, "decoder_ffn_dim": dim * 4, "encoder_ffn_dim": dim * 4})
     except AttributeError:  # T5
         teacher_e, teacher_d = teacher.config.num_layers, teacher.config.num_decoder_layers
         if e is None:
@@ -135,6 +139,9 @@ def create_student_by_copying_alternating_layers(
         if d is None:
             d = teacher_d
         init_kwargs.update({"num_layers": e, "num_decoder_layers": d})
+        if dim is not None: 
+            random_init = True
+            init_kwargs.update({"d_model": dim, "d_ff": dim * 4, "d_kv": dim / 12})
 
     # Kwargs to instantiate student: teacher kwargs with updated layer numbers + **extra_config_kwargs
     init_kwargs.update(extra_config_kwargs)
@@ -143,8 +150,9 @@ def create_student_by_copying_alternating_layers(
     student_cfg = teacher.config_class(**init_kwargs)
     student = AutoModelForSeq2SeqLM.from_config(student_cfg)
     # Start by copying the full teacher state dict this will copy the first N teacher layers to the student.
-    info = student.load_state_dict(teacher.state_dict(), strict=False)
-    assert info.missing_keys == [], info.missing_keys  # every student key should have a teacher keys.
+    if dim is None:
+        info = student.load_state_dict(teacher.state_dict(), strict=False)
+        assert info.missing_keys == [], info.missing_keys  # every student key should have a teacher keys.
 
     if copy_first_teacher_layers:  # Our copying is done. We just log and save
         e_layers_to_copy, d_layers_to_copy = list(range(e)), list(range(d))
@@ -224,7 +232,7 @@ def create_student_by_copying_alternating_layers(
     if reverse_decoder:
         d_layers_supervised = d_layers_supervised[::-1]
 
-    
+ 
 
     return student, e_layers_supervised, d_layers_supervised # e_layers_to_copy, d_layers_to_copy
 
