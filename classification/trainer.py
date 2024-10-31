@@ -1933,6 +1933,7 @@ class DistillBertTrainer(Trainer):
             student_config.num_hidden_layers = self.num_student_layers
             if dim is not None: 
                 student_config.hidden_size = dim
+                student_config.intermediate_size = dim * 4
                 random_init=True
         else: 
             raise NotImplementedError()
