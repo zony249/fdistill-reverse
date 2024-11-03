@@ -150,7 +150,7 @@ def create_student_by_copying_alternating_layers(
         init_kwargs.update({"num_layers": e, "num_decoder_layers": d})
         if dim is not None: 
             random_init = True
-            init_kwargs.update({"d_model": dim, "d_ff": dim * 4, "d_kv": dim / 12})
+            init_kwargs.update({"d_model": dim, "d_ff": dim * 4, "d_kv": dim // 12})
 
     # Kwargs to instantiate student: teacher kwargs with updated layer numbers + **extra_config_kwargs
     init_kwargs.update(extra_config_kwargs)
