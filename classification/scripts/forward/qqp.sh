@@ -20,7 +20,7 @@ python distillation.py \
   --do_train \
   --do_eval \
   --do_predict \
-  --num_student_layers=6 \
+  --num_student_layers=3 \
   --max_seq_length 128 \
   --per_device_train_batch_size 32 \
   --eval_steps=500 \
