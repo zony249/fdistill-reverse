@@ -7,6 +7,7 @@ import sys
 from pathlib import Path
 from typing import List, Dict
 import random
+import sys
 
 import pytorch_lightning as pl
 import torch
@@ -19,6 +20,22 @@ from make_student import create_student_by_copying_alternating_layers, get_layer
 from transformers import AutoModelForSeq2SeqLM, MBartTokenizer, T5ForConditionalGeneration
 from transformers.models.bart.modeling_bart import shift_tokens_right
 from utils import calculate_bleu, check_output_dir, freeze_params, label_smoothed_nll_loss, use_task_specific_params
+
+class CustomLogger: 
+    def __init__(self, stdout_temp, filename): 
+        self.stdout = stdout_temp
+        self.f = open(filename, "w")
+    def write(self, x):  
+        self.stdout.write(x)
+        self.f.write(x) 
+    def flush(self): 
+        self.stdout.flush()
+        self.f.flush() 
+    def close(self): 
+        sys.stdout = self.stdout 
+        self.f.close() 
+
+
 
 class CSVLogger: 
     def __init__(self, filename, mets=[]):
@@ -420,6 +437,9 @@ def distill_main(args):
     Path(args.output_dir).mkdir(exist_ok=True)
     check_output_dir(args, expected_items=3)
 
+    sys.stderr = sys.stdout 
+    stdout_tmp = sys.stdout
+    sys.stdout = CustomLogger(stdout_tmp, os.path.join(args.output_dir, "logs.txt"))
 
     model = create_module(args)
     return ft_main(args, model=model)
