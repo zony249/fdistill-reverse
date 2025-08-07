@@ -1113,9 +1113,11 @@ from torch.nn import functional as F
 from accelerate import infer_auto_device_map, dispatch_model
 from transformers.models.qwen3 import Qwen3ForCausalLM
 from transformers.models.qwen3.modeling_qwen3 import Qwen3DecoderLayer
+from transformers.models.llama.modeling_llama import LlamaDecoderLayer
 
 NO_SPLIT_MODULE_CLASSES = {
-    "qwen3": Qwen3DecoderLayer
+    "qwen3": Qwen3DecoderLayer, 
+    "llama": LlamaDecoderLayer
 }
 
 
@@ -1131,6 +1133,7 @@ STRIPED_MAPPING = {
 # teacher num_layers: teacher_layer_idx to match to.
 LAYER_SELECTION = {
     28: [3, 7, 11, 15, 19, 23, 27], 
+    32: [3, 7, 11, 15, 19, 23, 27, 31], 
     36: [3, 7, 11, 15, 19, 23, 27, 31, 35], 
     40: [3, 7, 11, 15, 19, 23, 27, 31, 35, 39]
 }
