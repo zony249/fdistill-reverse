@@ -1145,7 +1145,8 @@ class DistillTrainer(SFTTrainer):
                  ce_alpha = 1.0, 
                  kl_alpha = 1.0, 
                  hidden_alpha = 3.0, 
-                 matching_location = "striped", 
+                 matching_location = "striped",
+                 kl_mode = "forward",  
                  **kwargs):
         super().__init__(**kwargs) 
         self.teacher = teacher 
@@ -1163,6 +1164,7 @@ class DistillTrainer(SFTTrainer):
         self.kl_alpha = kl_alpha 
         self.hidden_alpha = hidden_alpha
         self.matching_location = matching_location
+        self.kl_mode = kl_mode
 
         self.permute_layers = torch.randperm(len(LAYER_SELECTION[self.teacher.config.num_hidden_layers]))
 
@@ -1200,9 +1202,10 @@ class DistillTrainer(SFTTrainer):
             student_hidden = hidden_states
 
             if self.kl_alpha > 0: 
-                pass 
-                # TODO
-                kl_loss = self.kl_loss(teacher_logits, student_logits, inputs["attention_mask"])
+                if self.kl_mode == "forward":
+                    kl_loss = self.kl_loss(teacher_logits, student_logits, inputs["attention_mask"])
+                elif self.kl_mode == "reverse": 
+                    kl_loss = self.rkl_loss(teacher_logits, student_logits, inputs["attention_mask"])
             
             if self.hidden_alpha > 0: 
                 if self.matching_location == "last": 
@@ -1252,6 +1255,15 @@ class DistillTrainer(SFTTrainer):
         t = F.softmax(t, dim=-1).to(s.device)
         s = F.log_softmax(s, dim=-1)#.to("cuda:0")
         loss = F.kl_div(s, t, reduction="none")
+        valid = attention_mask.sum().to(s.device)
+        total = attention_mask.numel()
+        return loss.sum(dim=(-1)).mean() * valid / total
+
+    def rkl_loss(self, t, s, attention_mask): 
+
+        s = F.softmax(s, dim=-1)
+        t = F.log_softmax(t, dim=-1).to(s.device)#.to("cuda:0")
+        loss = F.kl_div(t, s, reduction="none")
         valid = attention_mask.sum().to(s.device)
         total = attention_mask.numel()
         return loss.sum(dim=(-1)).mean() * valid / total

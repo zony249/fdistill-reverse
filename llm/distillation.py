@@ -44,6 +44,7 @@ if __name__ == "__main__":
     parser.add_argument("--kl_alpha", type=float, default=1.0)
     parser.add_argument("--hidden_alpha", type=float, default=3.0)
     parser.add_argument("--matching_location", type=str, default="striped", choices=["last", "striped", "forward", "reverse", "all_one", "shuffle"])
+    parser.add_argument("--kl_mode", type=str, default="reverse", choices=["forward", "reverse"])
 
     args = parser.parse_args()
 
@@ -121,5 +122,6 @@ if __name__ == "__main__":
                          kl_alpha=args.kl_alpha, 
                          hidden_alpha=args.hidden_alpha, 
                          matching_location=args.matching_location, 
+                         kl_mode=args.kl_mode, 
                          compute_metrics=compute_metrics)
     trainer.train()
