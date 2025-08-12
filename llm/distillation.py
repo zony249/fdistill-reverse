@@ -108,7 +108,7 @@ if __name__ == "__main__":
         save_steps=args.eval_every_steps, 
         gradient_accumulation_steps=args.gradient_accumulation_steps, 
         save_strategy="best", 
-        metric_for_best_model="mean_token_accuracy", 
+        metric_for_best_model="loss", 
         batch_eval_metrics=True)
 
 
