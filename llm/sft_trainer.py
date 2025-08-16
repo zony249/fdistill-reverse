@@ -55,7 +55,7 @@ from trl.data_utils import (
 from trl.models import clone_chat_template, get_act_offloading_ctx_manager
 from trl.trainer.sft_config import SFTConfig
 from trl.trainer.utils import (
-    ConstantLengthDataset,
+    # ConstantLengthDataset,
     generate_model_card,
     get_comet_experiment_url,
     pad,
@@ -633,8 +633,8 @@ class SFTTrainer(Trainer):
         dataset_name: str,
     ) -> Union[Dataset, IterableDataset]:
         # Convert the dataset to an IterableDataset if it is a ConstantLengthDataset
-        if isinstance(dataset, ConstantLengthDataset):
-            return dataset
+        # if isinstance(dataset, ConstantLengthDataset):
+        #     return dataset
 
         # Tabular backends like Arrow/Parquet insert `None` for mismatched keys in nested structures. Clean them from
         # sampled data.

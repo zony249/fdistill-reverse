@@ -15,6 +15,7 @@ from transformers import (
 from sft_trainer import SFTConfig
 from data_utils import get_dataset_and_task_processor
 from transformers.models.qwen3 import Qwen3ForCausalLM
+from transformers import Mxfp4Config
 
 from model_utils import load_model
 
@@ -39,7 +40,12 @@ if __name__ == "__main__":
 
     # os.makedirs(args.output_dir)
 
-    model, tok = load_model(args.base_model, torch_dtype=torch.bfloat16)
+    quant_conf =  Mxfp4Config(dequantize=False)
+
+    model, tok = load_model(args.base_model, 
+                            quantization_config=quant_conf,  
+                            torch_dtype=torch.bfloat16, 
+                            attn_implementation="eager")
 
     datasets, compute_metrics = get_dataset_and_task_processor(args.task, 
                                                                tok=tok, 
@@ -57,10 +63,13 @@ if __name__ == "__main__":
         peft_config = LoraConfig(
             task_type=TaskType.CAUSAL_LM, 
             inference_mode=False, 
-            r=32, 
-            lora_alpha=32, 
-            lora_dropout=0.1, 
-            target_modules = "all-linear"
+            r=8, 
+            lora_alpha=16, 
+            target_modules = "all-linear",  
+            # target_parameters=[
+            #     "mlp.experts.gate_up_proj",
+            #     "mlp.experts.down_proj",
+            # ],
         )
         model = get_peft_model(model, peft_config)
         model.print_trainable_parameters()
@@ -82,7 +91,9 @@ if __name__ == "__main__":
         gradient_accumulation_steps=args.gradient_accumulation_steps, 
         save_strategy="best", 
         metric_for_best_model="mean_token_accuracy", 
-        batch_eval_metrics=True)
+        batch_eval_metrics=True, 
+        auto_find_batch_size=False,
+        half_precision_backend='auto')
 
 
     trainer = SFTTrainer(model=model, 
@@ -90,6 +101,7 @@ if __name__ == "__main__":
                          args=trainer_cfg, 
                          train_dataset=trainset,
                          eval_dataset=eval_set,  
-                         compute_metrics=compute_metrics)
+                         compute_metrics=compute_metrics, 
+                         )
                         #  formatting_func=formatting_func)
     trainer.train()

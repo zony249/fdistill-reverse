@@ -11,6 +11,7 @@ from transformers import (
 )
 from transformers.models.qwen3 import Qwen3Config, Qwen3ForCausalLM
 from transformers.models.llama import LlamaConfig, LlamaForCausalLM
+# from unsloth import FastLanguageModel
 
 LAYER_COPY_MAP = { 
     28: [0, 4, 9, 13, 18, 22, 27], 
@@ -22,10 +23,10 @@ LAYER_COPY_MAP = {
 
 def load_model(hf_name_or_path: str,
                **kwargs) -> Tuple[PreTrainedModel, PreTrainedTokenizerBase]: 
-    config = AutoConfig.from_pretrained(hf_name_or_path, **kwargs) 
+    # config = AutoConfig.from_pretrained(hf_name_or_path, **kwargs) 
     tok = AutoTokenizer.from_pretrained(hf_name_or_path) 
     
-    model = AutoModelForCausalLM.from_pretrained(hf_name_or_path, config=config, **kwargs)
+    model = AutoModelForCausalLM.from_pretrained(hf_name_or_path, **kwargs)
 
     return model, tok
 
